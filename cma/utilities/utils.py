@@ -24,6 +24,8 @@ global_verbosity = 1
 # and False for NaN, and an exception for array([0,1]), see also
 # http://google-styleguide.googlecode.com/svn/trunk/pyguide.html#True/False_evaluations
 
+def _id(x, *args, **kwargs):
+    return x
 
 def is_(var):
     """intuitive handling of variable truth value also for `numpy` arrays.
@@ -490,23 +492,68 @@ class BlancClass(object):
 class DictClass(dict):
     """A class wrapped over `dict` to use class .-notation.
 
-    >>> from cma.utilities.utils import DictClass
-    >>> dict_ = dict((3 * c, c) for c in 'abcd')
-    >>> as_class = DictClass(dict_)
-    >>> assert as_class.__dict__ == dict_ == as_class
-    >>> assert as_class.aaa == 'a'
-    >>> as_class.new = 33
-    >>> assert 'new' in as_class
-    >>> as_class['nnew'] = 44
-    >>> assert as_class.nnew == 44
-    >>> assert len(as_class) == 6
+    Not clear whether tab completion works?
 
-    """
+    >>> from cma.utilities.utils import DictClass
+    >>> dict_ = dict((2 * char, char) for char in 'abcd')
+    >>> d = DictClass(dict_)
+    >>> assert d.__dict__ == dict_ == d
+    >>> assert d.aa == 'a' and len(d) == 4
+    >>> d.new = 33
+    >>> assert 'new' in d
+    >>> d['nnew'] = 44
+    >>> assert d.nnew == 44
+    >>> assert len(d) == 6
+
+"""
     def __init__(self, *args, **kwargs):
         dict.__init__(self, *args, **kwargs)
         self.__dict__ = self
     def __dir__(self):
         return self.keys()
+
+class DictClass2(dict):
+    """A dictionary that allows `.` attribute read access of its entries.
+
+    Assigning an attribute instead of the dictionary entry does not assign
+    (or create) a dictionary value and separates the attribute value from
+    the dictionary value permanently (in contrast to `DictClass`). This may
+    be useful to let the dictionary entry store the initial value and work
+    with the attribute value only, to access the current and possibly
+    changed value.
+
+    If neither the attribute nor the dictionary entry exist, an attempted
+    attribute access raises an `AttributeError` as to be expected.
+
+    By design, this class DOES NOT HAVE INTERACTIVE TAB COMPLETION for
+    attributes derived from the dictionary!?
+
+    Implementation detail: this class is less "intrusive" than `DictClass`
+    and should be entirely safe from under-the-hood surprises. It only
+    relies on the behavior of `__getattr__`: access of a nonexisting
+    attribute triggers (by Python convention) a call of `__getattr__`
+    which is here defined to return the dictionary entry value.
+
+    >>> from cma.utilities.utils import DictClass2
+    >>> d = DictClass2((2 * char, char) for char in 'abcd')
+    >>> list(d)
+    ['aa', 'bb', 'cc', 'dd']
+    >>> assert d.aa == 'a' and len(d) == 4, (list(d.values()), d.__dict__)
+    >>> d.new = 33  # does not go in the dict
+    >>> assert 'new' not in d and len(d) == 4, (list(d.values()), d.__dict__)
+    >>> d['new'] = 55
+    >>> assert (d.new, d['new']) == (33, 55)
+    >>> d['nnew'] = 44
+    >>> assert d.nnew == 44
+    >>> assert len(d) == 6
+
+"""
+    def __getattr__(self, name):
+        """called when ``self.name`` would raise an attribute error"""
+        if name not in self:
+            raise AttributeError("`{0}` is not an attribute. Attributes are {1}"
+                                 .format(name, list(self)))
+        return self[name]
 
 class DerivedDictBase(abc.MutableMapping):
     """for conveniently adding methods/functionality to a dictionary.
@@ -710,6 +757,17 @@ class DataDict(collections.defaultdict):
             self[k] += dict_[k]  # self is a dict of lists
         return self
 
+    def replace(self, replace_function=_id):
+        """replace all entries with the return value of `replace_function`.
+
+        The `replace_function` gets the original value, the key, and the
+        list index as arguments.
+        """
+        for k in self:
+            for i in range(len(self[k])):
+                self[k][i] = replace_function(self[k][i], key=k, index=i)
+        return self
+
     def save(self):
         with open(self.filename, 'wt') as f:
             f.write(repr(dict(self)))
@@ -728,12 +786,11 @@ class ExclusionListOfVectors(list):
         return False
 
 class ElapsedWCTime(object):
-    """measure elapsed cumulative time while not paused and elapsed time
-    since last tic.
+    """measure elapsed cumulative time while not paused since creation.
 
-    Use attribute `tic` and methods `pause` () and `reset` ()
-    to control the timer. Use attributes `toc` and `elapsed` to see
-    timing results.
+    To control the timer, use attribute `tic` and methods `pause` () and
+    `reset` (). To see timing results, use attributes `toc` (since last
+    `tic`) and `elapsed` (since creation).
 
     >>> import cma
     >>> e = cma.utilities.utils.ElapsedWCTime().pause()  # (re)start later
@@ -749,12 +806,15 @@ class ElapsedWCTime(object):
         """add time offset in seconds and start timing"""
         self._time_offset = time_offset
         self.reset()
+        self._time_at_creation = self._time_at_reset  # for the record
     def reset(self):
         """reset to initial state and start timing"""
         self.cum_time = self._time_offset
         self.paused = 0
         """time when paused or 0 while running"""
         self.last_tic = time.time()
+        self._last_toc = self.last_tic
+        self._time_at_reset = self.last_tic  # for the record only
         return self
     def pause(self):
         """pause timer, resume with `tic`"""
@@ -788,16 +848,23 @@ class ElapsedWCTime(object):
         return return_
     @property
     def elapsed(self):
-        """elapsed time while not paused, measured since creation or last
-        `reset`
+        """elapsed time since last `reset` while not paused.
+
+        Details: this triggers a `toc` call.
         """
         return self.cum_time + self.toc
     @property
     def toc(self):
-        """return elapsed time since last `tic`"""
+        """elapsed time since last `tic` or `pause` call"""
+        self._last_toc = time.time()
         if self.paused:
             return self.paused - self.last_tic
-        return time.time() - self.last_tic
+        return self._last_toc - self.last_tic
+    @property
+    def wallclock(self):
+        """never used: time between last `reset` and last `toc` (i.e. last usage)
+        """
+        return self._last_toc - self._time_at_reset
 
 class TimingWrapper(object):
     """wrap a timer around a callable.

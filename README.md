@@ -1,6 +1,6 @@
 # pycma &nbsp; &nbsp; &nbsp; &nbsp; 
-[![CircleCI](https://circleci.com/gh/CMA-ES/pycma/tree/master.svg?style=shield)](https://circleci.com/gh/CMA-ES/pycma/tree/master)
-[![Build status](https://ci.appveyor.com/api/projects/status/1rge11pwyt55b26k?svg=true)](https://ci.appveyor.com/project/nikohansen/pycma)
+![Deploy to GitHub Pages](https://github.com/CMA-ES/pycma/actions/workflows/python-package.yml/badge.svg)
+[![CircleCI](https://circleci.com/gh/CMA-ES/pycma/tree/main.svg?style=shield)](https://circleci.com/gh/CMA-ES/pycma/tree/main)
 ![GitHub Repo stars](https://img.shields.io/github/stars/CMA-ES/pycma?style=flat)
 [![Downloads](https://static.pepy.tech/badge/cma/month)](https://pepy.tech/project/cma)
 [![DOI](https://zenodo.org/badge/68926339.svg)](https://doi.org/10.5281/zenodo.2559634)
@@ -10,16 +10,16 @@
 
 <!--- 
 
+[![Build status](https://ci.appveyor.com/api/projects/status/1rge11pwyt55b26k?svg=true)](https://ci.appveyor.com/project/nikohansen/pycma)
 [![Build status](https://ci.appveyor.com/api/projects/status/1rge11pwyt55b26k/branch/master?svg=true)](https://ci.appveyor.com/project/nikohansen/pycma/branch/master)
 
 Zenodo: 34 points to the latest, this is 35: https://zenodo.org/badge/latestdoi/68926339 
 
 --->
   
-``pycma`` is a Python implementation of [CMA-ES](http://cma-es.github.io/) and a few related numerical optimization tools.
+``pycma`` is a Python implementation of [CMA-ES](http://cma-es.github.io/) and some related numerical optimization tools.
 
-The [Covariance Matrix Adaptation Evolution Strategy](https://en.wikipedia.org/wiki/CMA-ES) 
-([CMA-ES](http://cma-es.github.io/)) is a stochastic derivative-free numerical optimization
+The [CMA-ES](http://cma-es.github.io) ([Covariance Matrix Adaptation Evolution Strategy](https://en.wikipedia.org/wiki/CMA-ES)) is a stochastic derivative-free numerical optimization
 algorithm for difficult (non-convex, ill-conditioned, multi-modal, rugged, noisy) optimization
 problems in continuous and mixed-integer search spaces.
 
@@ -30,6 +30,7 @@ problems in continuous and mixed-integer search spaces.
 * [The `notebooks` folder](https://github.com/CMA-ES/pycma/tree/development/notebooks) provides example code in Jupyter notebooks, namely
   * [Basic use cases notebook](https://github.com/CMA-ES/pycma/tree/development/notebooks/notebook-usecases-basics.ipynb)
   * [Constraints handling notebook](https://github.com/CMA-ES/pycma/tree/development/notebooks/notebook-usecases-constraints.ipynb)
+  * [The `ask`-and-`tell` interface](https://github.com/CMA-ES/pycma/tree/development/notebooks/notebook-usecases-ask-and-tell.ipynb)
   * [Noise handling notebook](https://github.com/CMA-ES/pycma/tree/development/notebooks/notebook-usecases-noise.ipynb)
 
 * [API Documentation](http://cma-es.github.io/apidocs-pycma)
@@ -54,7 +55,7 @@ installation hints and a quick start guide.
 
 ## Installation from Github
 
-The quick way (this requires [`git`](https://git-scm.com) to be installed) to install the code from, for example, the `development` branch:
+The quick way to install the code from, for example, the `development` branch (this requires [`git`](https://git-scm.com) to be installed):
 
 ```sh
     pip install git+https://github.com/CMA-ES/pycma.git@development
@@ -89,6 +90,26 @@ It may be necessary to replace ``pip`` with ``python -m pip`` and/or prefixing
 either of these with ``sudo``.
 
 ## Version History
+
+* [Release ``4.4.2``](https://github.com/CMA-ES/pycma/releases/tag/r4.4.2)
+  - Fix compatibility issues (with [`comocma`](https://github.com/CMA-ES/pycomocma)):
+    - add back the (deprecated) `cma.constraints_handling.BoundTransform` class
+      which was missing since ``4.1.0``. Note that `cma.BoundTransform` is the
+      recommended way to access this class
+    - remove dependency of `OOOptimizer.optimize` on `self.result`
+  - fix [issue 337](https://github.com/CMA-ES/pycma/issues/337) where plotting bails
+    with some recent version of `matplotlib>3.8.0`.
+  - Various improvements of the logger and plotting.
+  - Remove default f-offset from binary test functions
+    (``cma.fitness_functions.binary_foffset = 0`` by default now)
+  - A few new module settings to (better) control corner case behavior.
+
+* [Release ``4.4.1``](https://github.com/CMA-ES/pycma/releases/tag/r4.4.1)
+  - `fmin2` accepts a constraints function as `constraints` keyword argument
+  - an improved `CMAEvolutionStrategyResult2` class which also contains the best feasible solution
+  - a `reset_options` method which also clears the current termination status
+  - polish the output of ``.optimize()`` and of ``.result_pretty()``
+  - catch final ``.stop()`` value displayed with `cma.plot`
 
 * [Release ``4.4.0``](https://github.com/CMA-ES/pycma/releases/tag/r4.4.0)
   - constraints handling is available also in the <tt>ask</tt>-and-<tt>tell</tt> interface (addressing issues [#258](https://github.com/CMA-ES/pycma/issues/258), [#287](https://github.com/CMA-ES/pycma/issues/287), and [#167](https://github.com/CMA-ES/pycma/issues/167))
