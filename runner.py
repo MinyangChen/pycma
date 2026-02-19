@@ -166,30 +166,42 @@ def main() -> None:
     from optimizers.shade import SHADEOptimizer
     from optimizers.lshade import LSHADEOptimizer
     from optimizers.ms_shade import MSSHADEOptimizer
+    from optimizers.shade_gp import SHADEGPOptimizer
+    from optimizers.gp_shade import GPSHADEOptimizer
+    from optimizers.de_gp import DEGPOptimizer
     from optimizers.ms_lshade import MSLSHADEOptimizer
+    from optimizers.dts_brq_cmaes import DTSBRQ_CMAESOptimizer
     from problems.ackley import AckleyProblem
     from problems.additive_subsystem_hs5 import AdditiveSubsystem
     from problems.hierarchical_subsystem import HierarchicalSubsystem
+    from optimizers.dts_rank_cmaes import DTS_RANK_CMAESOptimizer
+    from optimizers.dts_bnn_cmaes import DTSBNN_CMAESOptimizer
+
 
     # Use fixed seeds for repeatable runs across optimizers/problems.
-    run_times = 1  # number of independent runs per optimizer/problem
+    run_times = 5  # number of independent runs per optimizer/problem
     seeds = list(range(run_times))
     # seeds = [42]
-    max_evals = 10000
+    max_evals = 3000
 
     runner = ExperimentRunner(
         optimizers={
             # CMA-ES baseline
-            # "cma": PyCMAESOptimizer,
+            # "cma": PyCMAESOptimizer
             "dts_cma": DTSCMAESOptimizer,
+            # "dts_bnn_cma": DTSBNN_CMAESOptimizer,
+            # "shade_gp": SHADEGPOptimizer,
+            # "gp_shade": GPSHADEOptimizer,
+            # "de_gp": DEGPOptimizer,
+            # "dts_brq_cma": DTSBRQ_CMAESOptimizer,
             # "ms_dts_cma": MSDTSCMAESOptimizer,
+            # "dts_rank_cma": DTS_RANK_CMAESOptimizer,
             # # DE family
             # "shade": SHADEOptimizer,
             # "lshade": LSHADEOptimizer,
             # "ms_shade": MSSHADEOptimizer,
             # "ms_lshade": MSLSHADEOptimizer,
-            # # Surrogate-assisted CMA-ES
-            # # "lq_cma": PyLQCMAESOptimizer,
+            # "lq_cma": PyLQCMAESOptimizer,
             # "smas_shade": MSSHADEOptimizer,
             # "smas_lshade": MSLSHADEOptimizer,
         },
@@ -197,6 +209,7 @@ def main() -> None:
             # Standard benchmark
             # "ackley": AckleyProblem,
             "ackley20": AckleyProblem,
+            # "ackley10": AckleyProblem,
 
             # HS5 variants
             # "AdditiveSubsystem": AdditiveSubsystem,
@@ -213,7 +226,7 @@ def main() -> None:
             "popsize_mode":"double", # default / double
         },
         "dts_cma": {
-            "sigma0": None,
+            "sigma0": 20,
             "bounds": None,
             "popsize_mode":"double", # default / double
             "gp_params": None,
@@ -221,7 +234,7 @@ def main() -> None:
             "options": {},
         },
         "ms_dts_cma": {
-            "sigma0": None,
+            "sigma0": 20,
             "bounds": None,
             "popsize_mode":"double", # default / double
             "options": {},
@@ -238,6 +251,114 @@ def main() -> None:
                 "tolx": -1.0,
             }
         },
+        "dts_brq_cma": {
+            "sigma0": 20,
+            "bounds": None,
+            "popsize_mode":"double",
+            # BRQ surrogate settings (optional; these are the defaults)
+            "br_candidate_pool": 2500,
+            "br_y_std_min": 1e-12,
+            "br_fit_intercept": False,
+            # Keep unused config keys for runner compatibility (will be ignored)
+            "gp_params": None,
+            "dts_params": None,
+            "options": {},
+        },
+        # "dts_rank_cma": {
+        #     "sigma0": None,
+        #     "bounds": None,
+        #     "popsize_mode": "double",
+        #     # training set strategy
+        #     "n_max_train": 1200,
+        #     "global_train_frac": 0.10,
+        #     "global_best_k": 50,
+        #     # rank surrogate params
+        #     "rank_ensemble_size": 5,
+        #     "rank_hidden_sizes": (256, 256, 128),
+        #     "rank_epochs": 60,
+        #     "rank_batch_size": 256,
+        #     "rank_pairs_per_batch": 2048,
+        #     "rank_focus_top_frac": 0.30,
+        #     "rank_w_pair": 1.0,
+        #     "rank_w_list": 0.5,
+        #     "rank_w_reg": 0.10,
+        #     "rank_device": "auto",  # uses CUDA if available
+        #     "rank_use_amp": True,
+        #     "rank_bootstrap": True,
+        #     # keep unused keys for compatibility
+        #     "gp_params": None,
+        #     "dts_params": None,
+        #     "options": {},
+        # },
+        "dts_rank_cma": {
+            "sigma0": None,
+            "bounds": None,
+            "popsize_mode": "default",   # keep lambda small on laptop
+
+            # --- DTS control (most important) ---
+            "warmup_min_points": 400,    # was 1000; 20D doesn’t need that much warmup
+            # "use_adaptive_alpha": True,
+            # "alpha0": 0.35,              # start higher than 0.10
+            # "alpha_min": 0.25,           # prevents n_orig collapsing to ~2
+            # "alpha_max": 0.80,
+            "min_true_per_gen": 6,       # critical: makes ranking diagnostics meaningful
+            "prediction_guard": "shift",
+
+            # --- local training set size ---
+            "n_max_train": 600,
+            "global_train_frac": 0.05,
+            "global_best_k": 30,
+
+            # --- surrogate: CPU-friendly ---
+            "rank_device": "cpu",
+            "rank_use_amp": False,       # AMP is for GPU
+            "rank_ensemble_size": 3,     # 5 -> 3
+            "rank_hidden_sizes": (128, 128),
+            "rank_dropout": 0.05,
+            "rank_epochs": 20,           # 60 -> 20
+            "rank_batch_size": 128,
+            "rank_pairs_per_batch": 512, # 2048 -> 512
+            "rank_focus_top_frac": 0.40, # focus more on best region
+            "rank_w_pair": 1.0,
+            "rank_w_list": 0.2,          # listwise helps but keep light on CPU
+            "rank_w_reg": 0.05,
+            "rank_patience": 6,
+
+            # keep unused keys for runner compatibility (ignored)
+            "gp_params": None,
+            "dts_params": None,
+            "options": {},
+        },
+        "dts_bnn_cma": {
+            "sigma0": 20,
+            "bounds": None,
+            "popsize_mode": "double",
+
+            # DTS knobs (keep flow identical, just tune sizes)
+            "warmup_min_points": 1000,   # optional: 500 also works, but 100D benefits from more
+            "n_max_train": 1000,         # requested 800–1200 range
+            "selection_criterion": "cstd",
+            "prediction_guard": "shift",
+            "alpha0": 0.10,
+            "use_adaptive_alpha": False, # can enable if desired
+
+            # BNN knobs
+            "bnn_device": "auto",        # uses CUDA if available
+            "bnn_use_amp": True,         # enable AMP on A100
+            "bnn_mc_samples": 40,        # 20–50 recommended; 40 is a solid default
+            "bnn_epochs": 300,           # keep per-gen cost bounded; early stop is on
+            "bnn_lr": 2e-2,
+            "bnn_lr_gamma": 0.999,
+            "bnn_kl_weight": 0.05,       # template used 0.1; 0.05 often works well in practice
+            "bnn_prior_sigma": 0.1,
+
+            "print_every": 50,
+
+            # keep unused keys for runner compatibility (ignored by DTSBNN)
+            "gp_params": None,
+            "dts_params": None,
+            "options": {},
+        },
         "shade": {
             # bounds/sigma0 are not used in SHADE, but kept for runner compatibility
             "sigma0": None,
@@ -246,6 +367,54 @@ def main() -> None:
             "memory_size": None,
             "p_max": 0.2,
             "p_min": None,
+        },
+        "shade_gp": {
+            "pop_size": 100,
+            "memory_size": None,
+            "p_max": 0.2,
+            "p_min": None,
+            "warmup_min_points": 200,
+            "gp_rank_mode": "lcb",
+            "lcb_kappa": 1.0,
+            "gp_max_train_size": 300,
+            "gp_keep_best": 60,
+            "gp_nu": 2.5,
+            "gp_n_restarts_optimizer": 0,
+            "gp_random_state": None,
+            "gp_y_std_min": 1e-12,
+        },
+        "gp_shade": {
+            "pop_size": 100,
+            "memory_size": None,
+            "p_max": 0.2,
+            "p_min": None,
+            "warmup_min_points": 200,
+            "top_k_true": 10,
+            "gp_rank_mode": "lcb",
+            "lcb_kappa": 1.0,
+            "gp_max_train_size": 300,
+            "gp_keep_best": 60,
+            "gp_nu": 2.5,
+            "gp_n_restarts_optimizer": 0,
+            "gp_random_state": None,
+            "gp_y_std_min": 1e-12,
+            "print_every": 500,
+        },
+        "de_gp": {
+            "pop_size": None,  # defaults to 5 * dim
+            # "F": 0.5,
+            "F": 0.8,
+            "CR": 0.9,
+            "k_true": 1,
+            "strategy": "current-to-best",  # "rand" / "best" / "current-to-best"
+            # "strategy": "best",  # "rand" / "best" / "current-to-best"
+            "rank_mode": "lcb",  # "lcb" / "mean"
+            "kappa": 1.0,
+            "gp_nu": 2.5,
+            "gp_n_restarts_optimizer": 0,
+            "gp_random_state": None,
+            "gp_y_std_min": 1e-12,
+            "print_every": 500,
         },
         "lshade": {
             "pop_size": 100,
@@ -309,6 +478,7 @@ def main() -> None:
     problem_configs = {
         "ackley": {"dim": 100, "name": "ackley"},
         "ackley20": {"dim": 20, "name": "ackley"},
+        "ackley10": {"dim": 10, "name": "ackley"},
         "AdditiveSubsystem": {},
         "HierarchicalSubsystem": {},
     }
@@ -320,7 +490,7 @@ def main() -> None:
         problem_configs=problem_configs,
     )
 
-    # export_convergence(results, max_evals=max_evals, out_dir="convergence")
+    export_convergence(results, max_evals=max_evals, out_dir="convergence")
 
 
 if __name__ == "__main__":

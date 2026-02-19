@@ -274,7 +274,7 @@ class MSDTSCMAESOptimizer(BaseOptimizer):
         mimic_swap_prob: float = 0.2,
         inject_true_into_tell: bool = False,
         # ---- Logging ----
-        print_every: int = 500,
+        print_every: int = 100,
         **kwargs: Any,
     ) -> None:
         # Avoid forwarding unknown kwargs to BaseOptimizer
