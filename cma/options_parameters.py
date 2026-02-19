@@ -558,7 +558,13 @@ class CMAOptions(dict):
         try:
             if utils.is_str(val):
                 val = val.split('#')[0].strip()  # remove comments
-                if key.find('filename') < 0 and not (key == 'seed' and val.startswith('time')):
+                if key == 'CMA_const_trace':
+                    try:  # evaluate 'False', keep 'geo'...
+                        val = eval(safe_str(val), global_env, loc)
+                    except ValueError:
+                        pass
+                elif key.find('filename') < 0 and not (
+                        key == 'seed' and val.startswith('time')):
                         # and key.find('mindx') < 0:
                     val = eval(safe_str(val), global_env, loc)
             # invoke default
@@ -832,8 +838,9 @@ class CMAParameters(object):
     """
     def __init__(self, N, opts, ccovfac=1, verbose=True):
         """Compute strategy parameters, mainly depending on
-        dimension and population size, by calling `set`
+        dimension and population size, by calling `set`.
 
+        When ``ccovfac == 1``, we use ``ccovfac=opts['CMA_on']``.
         """
         self.N = N
         if ccovfac == 1:

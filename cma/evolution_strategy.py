@@ -231,6 +231,8 @@ tell_constraints_archives = True
 _where = np.nonzero  # to make pypy work, this is how where is used here anyway
 del division, print_function, absolute_import  #, unicode_literals, with_statement
 
+_record_hsig = False
+
 use_archives = "not anymore in effect"
 archive_sent_solutions = sys.version_info >= (2,6)
 '''If `cma.evolution_strategy.archive_sent_solutions`, save the genotype in
@@ -253,6 +255,9 @@ round_integer_variables_revert_changes = True
    `_round_integer_variables.archive` which stores solutions before integer
    variables are rounded at the end of `ask`. Renamed from
    `ask_phenotype_archive_revert_changes` since v4.3.1.'''
+
+_redistribute_sigma_above = 1e9
+'''when ``..._above > 1`` and `sigma` becomes too large, push variance from `sigma` to `sigma_vec`'''
 
 class InjectionWarning(UserWarning):
     """Injected solutions are not passed to tell as expected"""
@@ -285,6 +290,7 @@ class _CMASolutionDict_functional(_SolutionDict):
 
     # TODO: insert takes 30% of the overall CPU time, mostly in def key()
     #       with about 15% of the overall CPU time
+    # NOTE: Likely improved by reducing calls to def key() on Jan 2026 (PR #336).
     def insert(self, key, geno=None, iteration=None, fitness=None,
                 value=None, cma_norm=None):
         """insert an entry with key ``key`` and value
@@ -308,10 +314,7 @@ class _CMASolutionDict_functional(_SolutionDict):
 
         self.last_solution_index += 1
         if value is not None:
-            try:
-                iteration = value['iteration']
-            except:
-                pass
+            iteration = value.get('iteration', iteration)
         if iteration is not None:
             if iteration > self.last_iteration:
                 self.last_solution_index = 0
@@ -319,18 +322,18 @@ class _CMASolutionDict_functional(_SolutionDict):
         else:
             iteration = self.last_iteration + 0.5  # a hack to get a somewhat reasonable value
         if value is not None:
-            self[key] = value
+            entry = value
         else:
-            self[key] = {'pheno': key}
+            entry = {'pheno': key}
         if geno is not None:
-            self[key]['geno'] = geno
-        if iteration is not None:
-            self[key]['iteration'] = iteration
+            entry['geno'] = geno
+        entry['iteration'] = iteration
         if fitness is not None:
-            self[key]['fitness'] = fitness
+            entry['fitness'] = fitness
         if cma_norm is not None:
-            self[key]['cma_norm'] = cma_norm
-        return self[key]
+            entry['cma_norm'] = cma_norm
+        self[key] = entry
+        return entry
 
 class _CMASolutionDict_empty(dict):
     """a hack to get most code examples running"""
@@ -403,8 +406,227 @@ class CMAEvolutionStrategyResult(collections.namedtuple(
 
     """
 
+class CMAEvolutionStrategyResult2(object):
+    """A results class.
+
+    This class is of rather declarative nature allowing to access the result in
+    its attributes after running an optimization. Additionally, the class
+    provides a `names` and an `asdict` property.
+
+    >>> import cma
+    >>> es = cma.CMA(2 * [1], .1, {'verbose': -9}).optimize(cma.ff.sphere, 4, iterations=5)
+    >>> isinstance(es.result, cma.evolution_strategy.CMAEvolutionStrategyResult2)
+    True
+
+    The easiest ways to examine the results visually is by ``list(es.result)``
+    or like
+    
+    >>> es.result.asdict  # doctest: +ELLIPSIS
+    {'xbest':...
+
+    We can also check the available attribute names like
+
+    >>> es.result.names  # doctest: +ELLIPSIS
+    ['xbest', 'fbest',...
+
+    and then check a value like
+
+    >>> float(es.result.xbest[0]) < 10
+    True
+
+    Otherwise, the result class acts largely like a `dataclass` and like the
+    original `namedtuple` `CMAEvolutionStrategyResult`, however with
+    _additional_ attributes: as of 2025 the `.best_feasible` attribute has been
+    added. For backward compatibility, index access of the original entries is
+    possible but discouraged, like
+
+    >>> es.result[1] == es.result[-7] == es.result.fbest  # deprecated
+    True
+
+    The nine result attributes are:
+
+    ``xbest`` best solution evaluated, this may not reflect a good solution
+    under noise or with a changing fitness function like in the constrained
+    case.
+
+    ``fbest`` objective function value of the best solution
+
+    ``evals_best`` evaluation count when ``xbest`` was evaluated
+
+    ``best_feasible`` is a dictionary with the keys ``'x', 'f', 'evals'``
+    (and possibly others), the feasible counterparts to ``xbest, fbest,
+    evals_best``. This is particularly useful with constraints.
+    ``best_feasible`` is not accessible by index.
+
+    ``evaluations`` overall done
+
+    ``iterations`` overall done
+
+    ``xfavorite`` final distribution mean in "phenotype" space, considered
+    to be the current best estimate of the optimum.
+
+    ``stds`` effective final standard deviations, can be used to compute a
+    lower bound on the expected coordinate-wise distance to the true
+    optimum, which is (very!) approximately ``stds[i] * dim**0.5 * 3 /
+    np.minimum(popsize, 3 * dim + 15)`` (was: ``stds[i] * dimension**0.5 /
+    min(mueff, dimension) / 1.5 / 5 ~ stds[i] * dimension**0.5 /
+    min(popsize / 2, dimension) / 5``, where dimension =
+    CMAEvolutionStrategy.N and mueff =
+    CMAEvolutionStrategy.sp.weights.mueff ~ 0.3 * popsize).
+
+  ``stop`` termination conditions in a dictionary.
+
+    CAVEAT: in contrast to a named tuple, this class iterates over items, not
+    values, hence ``dict(es.result)`` works as expected. ``list(es.result)`` is
+    not backward compatible (providing a list of values without keys seems
+    rather pointless given the values are not homogenuous). The previous value
+    of ``list(es.result)`` can be obtained by ``[r[1] for r in es.result]``.
+
+    While not provided in this class, the (penalized-)best solution
+    of the last completed iteration can be accessed via the attribute
+    ``.pop_sorted[0]`` of `CMAEvolutionStrategy` and the respective
+    objective function value via ``.fit.fit[0]``.
+
+    Details:
+
+    - in addition to ``._asdict()`` and ``dir(.)`` (which works rather
+      poorly) for the old `CMAEvolutionStrategyResult`, viewing with
+      ``dict(.)`` and ``.asdict`` works for this class too.
+    - ``list(CMA.fit.idx).index(i)`` is the index of the i-ths sampled solution
+      of the last completed iteration in ``pop_sorted``. In other words, it is
+      the (original) index of the i+1-th best solution.
+
+    Technical details:
+
+    - The class allows to have new attributes while keeping backward
+      compatible index access of the original eight attributes of the
+      `namedtuple` `CMAEvolutionStrategyResult`. ``es.result[-8]`` still
+      equals ``es.result[0]``. Newly introduced attributes are ignored in
+      this count and cannot be accessed by position index. Index access
+      is discouraged.
+    - inheriting from a `list` would work too, but we would have the list
+      methods as additional attributes.
+
+"""
+    def __init__(self,
+            xbest,
+            fbest,
+            evals_best,
+            best_feasible,
+            evaluations,
+            iterations,
+            xfavorite,
+            stds,
+            stop,
+        ):
+        """set attributes with the arguments resembling `namedtuple` or `dataclass`"""
+        # let's guaranty the attribute order for sure
+        _vars = dict(locals())  # locals() in the below iterator doesn't see the argument names
+        self._params = tuple((name, _vars[name]) for name in
+                                ('xbest',
+                                 'fbest',
+                                 'evals_best',
+                                 'best_feasible',
+                                 'evaluations',
+                                 'iterations',
+                                 'xfavorite',
+                                 'stds',
+                                 'stop',
+                                ))
+        self.xbest = xbest  # helps for code inspection?
+        self.fbest = fbest
+        self.evals_best = evals_best
+        self.best_feasible = best_feasible
+        self.evaluations = evaluations
+        self.iterations = iterations
+        self.xfavorite = xfavorite
+        self.stds = stds
+        self.stop = stop
+
+        # in case we forgot a parameter in the second list :-)
+        for k, v in self._params:
+            setattr(self, k, v)  # set attributes, act like a dataclass
+
+        # was: inserting arguments into dict=self:
+        #      self.update((k, v) for k, v in locals().items() if k != 'self')
+        # now: add arguments _only_ as attributes, this allows for tab completion
+        #      and does not allow dict-access by name, however tab completion does not work!?
+        # self._params = tuple((k, v) for k, v in locals().items() if k != 'self')
+
+    @property
+    def names(self):
+        """list of attribute names"""
+        return [p[0] for p in self._params]
+
+    @property
+    def asdict(self):
+        return self._asdict()
+
+    def _asdict(self):  # `namedtuple` has an _asdict() method
+        return dict(self._params)
+
+    def __getitem__(self, i):
+        """for backward compatibility, access by the (old) index works too,
+        this is supposed to stay as is forever.
+        """
+        if i not in range(-8, 8):
+            raise IndexError("{0} is not a valid result index, only -8...7 are valid"
+                             " and refer to"
+                             "\n0=xbest,fbest,evals_best,evaluations,iterations,xfavorite,stds,7=stop"
+                             .format(i))
+        res = (self.xbest if i in (0, -8) else
+               self.fbest if i in (1, -7) else
+               self.evals_best if i in (2, -6) else
+               self.evaluations if i in (3, -5) else
+               self.iterations if i in (4, -4) else
+               self.xfavorite if i in (5, -3) else
+               self.stds if i in (6, -2) else
+               self.stop if i in (7, -1) else
+               None)
+        # # was:
+        # # Caveat: len(self) gives a larger value than expected.
+        # if 11 < 3:  # feature index backwards compatibility
+        #     self[0] = xbest
+        #     self[1] = fbest
+        #     self[2] = evals_best
+        #     self[3] = self[-5] = evaluations
+        #     self[4] = self[-4] = iterations
+        #     self[5] = self[-3] = xfavorite
+        #     self[6] = self[-2] = stds
+        #     self[7] = self[-1] = stop
+        return res
+
+    def __len__(self):
+        return len(self._params)
+
+    def __iter__(self):
+        """return iterator over names"""
+        # return (self[i] for i in range(8))  # would be fully backward compatible
+        # return (p[0] for p in self._params)  # iterate names
+        return (p for p in self._params)  # seems generally more useful?
+
+    # def __dir__(self):
+    #     """show available attributes"""
+    #     # gets alphabetized
+    #     return [p[0] for p in self._params] + ['asdict']
+
+    def __str__(self):
+        """string representation of self.
+
+        arrays come without commata like ``'[val1 val2 ...]'``, however in a `dict`
+        they look like `repr(.)` like ``'array([val1, val2, ...])'``.
+        """
+        # d = {k: v for k, v in self.items() if not isinstance(k, int)}
+        # return "{0}={1}".format("CMAEvolutionStrategyResult2", dict(self._params))
+        return "{0}({1})".format("CMAEvolutionStrategyResult2",
+                                 ', '.join(['{0}={1}'.format(*v) for v in self._params]))
+
+    def __repr__(self):
+        return "{0}({1})".format("CMAEvolutionStrategyResult2",
+                                 ', '.join(['{0}={1}'.format(k, repr(v)) for k, v in self._params]))
+
 class _CMAEvolutionStrategyResult(tuple):
-    """A results tuple from `CMAEvolutionStrategy` property ``result``.
+    """Deprecated: A results tuple from `CMAEvolutionStrategy` property ``result``.
 
     This tuple contains in the given position
 
@@ -561,7 +783,7 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
     >>> es.optimize(cma.ff.elli, verb_disp=1)  # doctest: +ELLIPSIS
     Iterat #Fevals   function value  axis ratio  sigma  min&max std  t[m:s]
         1      8 2.09...
-    >>> assert len(es.result) == 8, es.result
+    >>> assert len(es.result) >= 8, es.result
     >>> assert es.result.fbest < 1e-9, es.result
 
     The optimization loop can also be written explicitly:
@@ -710,7 +932,7 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
       200 ...
     >>> assert es.result.evals_best < 15000, es.result
     >>> assert cma.s.Mh.vequals_approximately(es.result.xbest, 12 * [1], 1e-5), es.result
-    >>> assert len(es.result) == 8, es.result
+    >>> assert len(es.result) >= 8, es.result
 
     Details
     =======
@@ -2580,7 +2802,7 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
                 print('parameters modified')
         # hsig = sum(self.ps**2) / self.N < 2 + 4./(N+1)
 
-        if 11 < 3:  # diagnostic data
+        if _record_hsig:  # diagnostic data
             # self.out['hsigcount'] += 1 - hsig
             if not hsig:
                 self.hsiglist.append(self.countiter)
@@ -2601,6 +2823,8 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
         self.pc = (1 - cc) * self.pc + hsig * (
                     (cc * (2 - cc) * self.sp.weights.mueff)**0.5 / self.sigma
                         / cmean) * (self.mean - mold) / self.sigma_vec.scaling
+        if self.opts['CSA_invariant_path']:
+            self._path_for_invariant_update = self.sm.transform_inverse(self.pc)
         dd_params = self.sigma_vec.parameters(self.sp.weights.mueff,
                                         c1_factor=self.opts['CMA_rankone'],
                                         cmu_factor=self.opts['CMA_rankmu']
@@ -2736,18 +2960,23 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
         if self.sigma * min(self.D) < self.opts['mindx']:  # TODO: sigma_vec is missing here
             self.sigma = float(self.opts['mindx'] / min(self.D))
 
-        if self.sigma > 1e9 * self.sigma0:
-            alpha = float(self.sigma / max(self.sm.variances)**0.5)
-            if alpha > 1:
-                try:
-                    self.sm *= alpha
-                except:
-                    pass
-                else:  # change representation / "coordinate system"
-                    self.sigma /= alpha**0.5  # adjust only half
-                    self._sigma_old /= alpha**0.5  # semibug, fixed Sep 2025
-                    self.opts['tolupsigma'] /= alpha**0.5  # to be compared with sigma
-                    self._updateBDfromSM()
+        if _redistribute_sigma_above > 1 and (
+                self.sigma > _redistribute_sigma_above * self.sigma0):
+            try:
+                alpha = float(self.sigma / max(self.sm.variances)**0.5)
+            except Exception:
+                pass
+            else:
+                if alpha > 1:
+                    try:
+                        self.sm *= alpha
+                    except Exception:
+                        pass
+                    else:  # change representation / "coordinate system"
+                        self.sigma /= alpha**0.5  # adjust only half
+                        self._sigma_old /= alpha**0.5  # semibug, fixed Sep 2025
+                        self.opts['tolupsigma'] /= alpha**0.5  # to be compared with sigma
+                        self._updateBDfromSM()
 
         # TODO increase sigma in case of a plateau?
 
@@ -2795,6 +3024,9 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
             self.timer = utils.ElapsedWCTime()
 
         self.more_to_write.check()
+        
+        if 11 < 3:  # passes all tests
+            self.sp.set(self.opts, ccovfac=self.opts['CMA_on'], verbose=0)
     # end tell()
     tell2.__doc__ = tell.__doc__
 
@@ -2943,6 +3175,32 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
                 self._injected_solutions_archive.pop(k)
         return indices  # in sorted pop
 
+    def reset_options(self, **kwargs):
+        """clear termination and set any `CMAOptions` passed via
+
+        keyword arguments or like ``**opts_dict``. The validity of the option
+        names is checked, the validity of the values is not checked.
+
+        Some resettings will not be effective. For those with a ``'#v'``
+        flag in their description, the effectiveness is guarantied. See
+        `CMAOptions`.
+
+        Return `self`, the new options are in ``self.opts``.
+        """
+        for k, v in kwargs.items():
+            if k in self.opts:
+                if self.opts['verbose'] > 7 and "#v" not in CMAOptions()[k]:
+                    warnings.warn("{0} is not a versatile option, resetting to {1}"
+                                  " may not have the desired effect".format(k, v))
+                self.opts[k] = v
+            else:
+                warnings.warn("option {0} is not recognized (hence value {1} is ignored)\n"
+                              "  Check out `cma.CMAOptions` to see the valid names."
+                              .format(k, v))
+        self.sp.set(self.opts, ccovfac=self.opts['CMA_on'])
+        self.stop().clear()
+        return self
+
     @property
     def stds(self):
         """return array of coordinate-wise standard deviations (phenotypic).
@@ -2962,9 +3220,18 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
         three apply to `self.mean`.
         """
         return self.sigma * (self.sigma_vec.scaling * np.sqrt(self.sm.variances))
-
     @property
     def result(self):
+        """return a `CMAEvolutionStrategyResult2` class instance.
+
+        :See: `cma.evolution_strategy.CMAEvolutionStrategyResult2`
+            or try ``help(...result)`` on the ``result`` property
+            of an `CMAEvolutionStrategy` instance or an
+            `CMAEvolutionStrategyResult2` instance.
+    """
+        return self._result2
+    @property
+    def _result0(self):
         """return a `CMAEvolutionStrategyResult` `namedtuple`.
 
         :See: `cma.evolution_strategy.CMAEvolutionStrategyResult`
@@ -2986,8 +3253,45 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
             self.stds,
             self.stop()
         )
+    @property
+    def _result2(self):
+        """return a `CMAEvolutionStrategyResult2` class instance.
 
-    def result_pretty(self, number_of_runs=0, time_str=None,
+        :See: `cma.evolution_strategy.CMAEvolutionStrategyResult2`
+            or try ``help(..._result2)`` on the ``result2`` property
+            of an `CMAEvolutionStrategy` instance or on the
+            `CMAEvolutionStrategyResult2` instance itself.
+    """
+        def get_best_feas(x, f, g, evals, feasible_iterations):
+            """assumes that `.best_feasible` is a BestFeasibleSolution.
+
+            Otherwise we get more `None` value entries.
+            """
+            if hasattr(self, 'best_feasible'):
+                best = getattr(self, 'best_feasible')
+                x, f, g, feasible_iterations = [getattr(best, field, None)
+                            for field in ['x', 'f', 'g', 'count']]
+                evals = None
+            d = locals()
+            return utils.DictClass2(((k, d[k]) for k in d
+                            if k in ['x', 'f', 'g', 'evals', 'feasible_iterations']))
+
+        x, f, evals = self.best.get()
+        best_feas = get_best_feas(x, f, None, evals, None)  # keep variables local
+        return CMAEvolutionStrategyResult2(
+            x,
+            f,
+            evals,
+            best_feas,
+            self.countevals,
+            self.countiter,
+            # TODO: should become self.to_phenotype(self.mean) !?
+            self.gp.pheno(self.mean[:], into_bounds=self.boundary_handler.repair),
+            self.stds,
+            self.stop()
+        )
+
+    def result_pretty(self, number_of_restarts=0, time_str=None,
                       fbestever=None):
         """pretty print result.
 
@@ -2996,18 +3300,26 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
         """
         if fbestever is None:
             fbestever = self.best.f
-        s = (' after %i restart' + ('s' if number_of_runs > 1 else '')) \
-            % number_of_runs if number_of_runs else ''
-        for k, v in self.stop().items():
-            print('termination on %s=%s%s' % (k, str(v), s +
-                  (' (%s)' % time_str if time_str else '')))
+
+        # print like "termination on {'tolfun': 1e-11} after 1 restart"
+        print('termination on {0}{1}{2}'.format(self.stop(),
+                  ' ({0})'.format(time_str) if time_str else '',
+                  ' after {0} restart{1}'.format(
+                        number_of_restarts, 's' if number_of_restarts > 1 else '')
+                    if number_of_restarts > 0 else ''))
+        # was:
+        # s = (' after %i restart' + ('s' if number_of_runs > 1 else '')) \
+        #     % number_of_runs if number_of_runs else ''
+        # for k, v in self.stop().items():
+        #     print('termination on %s=%s%s' % (k, str(v), s +
+        #           (' (%s)' % time_str if time_str else '')))
 
         print('final/bestever f-value = %e %e after %d/%d evaluations' % (
             self.best.last.f, fbestever, self.countevals, self.best.evals))
         if self.N < 9:
             print('incumbent solution: ' + ' '.join(str(self.to_phenotype(self.mean, into_bounds=self.boundary_handler.repair)).split())
                                            .replace(' ', ', ').replace('[,', '['))
-            print('std deviation: ' + ' '.join(str(self.stds).split())
+            print('std deviations: ' + ' '.join(str(self.stds).split())
                                            .replace(' ', ', ').replace('[,', '['))
         else:
             print('incumbent solution: %s ...]' % (str(self.to_phenotype(self.mean, into_bounds=self.boundary_handler.repair)[:8])[:-1]))
@@ -3611,7 +3923,8 @@ class CMAEvolutionStrategy(interfaces.OOOptimizer):
     def plot(self, *args, **kwargs):
         """plot current state variables using `matplotlib`.
 
-        Details: calls `self.logger.plot`.
+        This calls `self.logger.plot`, see `cma.CMADataLogger.plot` to see all
+        valid keyword arguments.
         """
         if not hasattr(self.logger, 'es') or self.logger.es is None:
             self.logger.es = self  # let logger extract es.stop()
@@ -4143,7 +4456,8 @@ def fmin2(objective_function, x0, sigma0,
          noise_kappa_exponent=0,  # TODO: add max kappa value as parameter
          bipop=False,
          callback=None,
-         init_callback=None):
+         init_callback=None,
+         constraints=None):
     """functional interface to the stochastic optimizer CMA-ES
     for non-convex function minimization.
 
@@ -4176,16 +4490,18 @@ def fmin2(objective_function, x0, sigma0,
 
     Arguments
     =========
+    The order of arguments is kept for historical reasons.
+
     ``objective_function``
-        called as ``objective_function(x, *args)`` to be minimized.
-        ``x`` is a one-dimensional `numpy.ndarray`. See also the
-        `parallel_objective` argument.
-        ``objective_function`` can return `numpy.NaN`, which is
-        interpreted as outright rejection of solution ``x`` and invokes
-        an immediate resampling and (re-)evaluation of a new solution
-        not counting as function evaluation. The attribute
+        called as ``objective_function(x, *args)`` to be minimized. ``x``
+        is a one-dimensional `numpy.ndarray`. See also the
+        `parallel_objective` argument. ``objective_function`` can return
+        `numpy.NaN`, which is interpreted as outright rejection of solution
+        ``x`` and invokes an immediate resampling and (re-)evaluation of a
+        new solution not counting as function evaluation. The attribute
         ``variable_annotations`` is passed into the
-        ``CMADataLogger.persistent_communication_dict``.
+        ``CMADataLogger.persistent_communication_dict``. See also
+        ``constraints`` below.
     ``x0``
         list or `numpy.ndarray`, initial guess of minimum solution
         before the application of the geno-phenotype transformation
@@ -4280,6 +4596,9 @@ def fmin2(objective_function, x0, sigma0,
         are given in the `options`) or ``es.integer_centering =
         cma.integer_centering.IntCentering(es, correct_bias=False)``
         disables its bias correction.
+    ``constraints``
+        A function that takes a solution `x` as input and returns a list of
+        constraint values desired to become <= 0.
 
     Optional Arguments
     ==================
@@ -4316,7 +4635,7 @@ def fmin2(objective_function, x0, sigma0,
        Covariance matrix is diagonal for 100 iterations (1/ccov=26...
     Iterat #Fevals   function value  axis ratio  sigma ...
         1     10 ...
-    termination on tolfun=1e-11 ...
+    termination on {'tolfun': 1e-11} ...
     final/bestever f-value = ...
     >>> assert es.result.fbest < 1e-12  # f-value of best found solution
     >>> assert es.result.evaluations < 8000  # evaluations
@@ -4398,7 +4717,8 @@ def fmin2(objective_function, x0, sigma0,
          noise_kappa_exponent,
          bipop,
          callback,
-         init_callback)
+         init_callback,
+         constraints=constraints)
     return res[0], res[-2]
 
 
@@ -4468,7 +4788,7 @@ def fmin(objective_function, x0, sigma0, *posargs, **kwargs):
        Covariance matrix is diagonal for 100 iterations (1/ccov=26...
     Iterat #Fevals   function value  axis ratio  sigma ...
         1     10 ...
-    termination on tolfun=1e-11 ...
+    termination on {'tolfun': 1e-11} ...
     final/bestever f-value = ...
     >>> assert res[1] < 1e-12  # f-value of best found solution
     >>> assert res[2] < 8000  # evaluations
@@ -4751,7 +5071,11 @@ def fmin(objective_function, x0, sigma0, *posargs, **kwargs):
                                 utils.print_message('%d f-degrading iterations (set verbose<=4 to suppress)'
                                                     % degrading_iterations_count,
                                                     iteration=es.countiter)
-                    es.tell(X, fit)  # prepare for next iteration
+                    if kwargs.get('constraints', None) is not None:
+                        es.tell2(X, fit, [kwargs['constraints'](x) for x in X])
+                    else:
+                        es.tell(X, fit)  # prepare for next iteration
+
                     if noise_handling:  # it would be better to also use these f-evaluations in tell
                         es.sigma *= noisehandler(X, fit, objective_function, es.ask,
                                                  args=args)**fmin_opts['noise_change_sigma_exponent']
@@ -4841,7 +5165,7 @@ def fmin(objective_function, x0, sigma0, *posargs, **kwargs):
         if irun:
             es.best.update(best)
             # TODO: there should be a better way to communicate the overall best
-        return es.result + (es.stop(), es, logger)
+        return es._result0 + (es.stop(), es, logger)
         ### 4560
         # TODO refine output, can #args be flexible?
         # is this well usable as it is now?
@@ -4977,7 +5301,7 @@ def fmin_con(objective_function, x0, sigma0,
     # _al.chi_domega = 1.1
     # _al.dgamma = 1.5
 
-    best_feasible_solution = ot.BestSolution2()
+    best_feasible_solution = ot.BestFeasibleSolution()
     if archiving:
         archives = [
             _constraints_handler.ConstrainedSolutionsArchive(_constraints_handler._g_pos_max),
@@ -5003,8 +5327,9 @@ def fmin_con(objective_function, x0, sigma0,
         fval, gvals = _ifloat(f(x)), constraints(x)
         alvals = _al(gvals)
         if all([gi <= 0 for gi in gvals]):
-            best_feasible_solution.update(fval, x,
-                info={'x':x, 'f': fval, 'g':gvals, 'g_al':alvals})
+            best_feasible_solution.update(fval, gvals, alvals, x,
+                info={  # for historical reasons
+                      'x':x, 'f': fval, 'g':gvals, 'g_al':alvals})
         info = _constraints_handler.constraints_info_dict(
                     _al.count_calls, x, fval, gvals, alvals)
         for a in archives:
@@ -5039,22 +5364,27 @@ def fmin_con(objective_function, x0, sigma0,
                            **kwargs_post)
         if es_post.best.f == 0:
             f = _ifloat(objective_function(es_post.best.x))
-            es.best_feasible.update(f, x=es_post.best.x, info={
-                'x': es_post.best.x,
-                'f': f,
-                'g': None  # it's a feasible solution, so we don't really care
-            })
+            # we don't know the g-value of best.x, but we know it's feasible
+            # and hence g must be negative (or zero)
+            es.best_feasible.update(f, [-1], None, x=es_post.best.x,
+                        info={  # for historical reasons
+                            'x': es_post.best.x,
+                            'f': f,
+                            'g': None  # it's a feasible solution, so we don't really care
+                        })
             return es.best_feasible.x, es
         x_post = es_post.result.xfavorite
         g_x_post, h_x_post = g(x_post), h(x_post)
         if all([gi <= 0 for gi in g_x_post]) and \
                 all([hi ** 2 <= post_optimization ** 2 for hi in h_x_post]):
             f_x_post = _ifloat(objective_function(x_post))
-            es.best_feasible.update(f_x_post, x=x_post, info={
-                'x': x_post,
-                'f': f_x_post,
-                'g': list(g_x_post) + list(h_x_post)
-            })
+            es.best_feasible.update(f_x_post, g_x_post, None, x=x_post,
+                        info={  # for historical reasons
+                                'x': x_post,
+                                'f': f_x_post,
+                                'g': list(g_x_post) + list(h_x_post),
+                                'h': h_x_post
+                            })
             return x_post, es
         else:
             utils.print_warning('Post optimization was unsuccessful',
@@ -5122,7 +5452,7 @@ def fmin_con2(objective_function, x0, sigma0,
 
     # optimize to feasible solution, in case
     if find_feasible_final:
-        x = fun.find_feasible(es)  # uses es.optimize
+        x = fun.find_feasible(es)  # uses ask-and-tell
         if kwargs_fmin['options'].get('eval_final_mean', None):
             # this doesn't make sense if xfavorite is returned anyway
             g = constraints(es.result.xfavorite)

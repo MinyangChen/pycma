@@ -20,12 +20,44 @@ from . import restricted_gaussian_sampler as _rgs
 _where = np.nonzero  # to make pypy work, this is how where is used here anyway
 array = np.array
 
+clip_on = False
+'''plot option, sometimes `True` is useful to get a good frame'''
+corr_in_plot_divers_color = ''
+'''plot format string to plot correlation in `plot_divers`, was `'c'`, could be `'gray'`
+   or `'C5'` or `'#008000'` or `'.--c'`, `''` means to plot nothing'''
+cma_logger_plot_x_annotate_idx = range(100)
+'''iterable of variable indices or last index which will be annotated'''
+cma_logger_plot_x_annotation_lines_limit = 1000
+'''number of variables above annotations are omitted'''
+
+def _id(x):
+    return x
+
+def seconds2str(sec):
+    """return `*d**h**` or `*h**` or `*m**s` or `*.*sec`"""
+    sec_ = sec
+    d = int(sec_ / (24 * 3600))
+    if d == 1:
+        d = 0
+    sec_ -= 24 * 3600 * d
+    h = int(sec_ / 3600)
+    sec_ -= 3600 * h
+    m = int(sec_ / 60)
+    sec_ -= m * 60
+    if d:
+        return "{0}d{1:02d}h{2:02d}".format(d, h, m)
+    if h:
+        return "{0}h{1:02d}".format(h, m)
+    if m:
+        return "{0}m{1:02.0f}s".format(m, sec_)
+    return "{0:.1f} sec".format(sec_)
+
 def _fix_lower_xlim_and_clipping():
     """minimize space wasted below x=0"""
     from matplotlib.pyplot import gca
     a = gca()
     for line in a.get_lines():
-        line.set_clip_on(False)
+        line.set_clip_on(clip_on)
     for key in a.spines:  # avoid border lines hiding data
         a.spines[key].set_zorder(0)  # 1.01 is still below the grid
     a.set_ymargin(0)
@@ -56,6 +88,13 @@ def _monotone_abscissa(x, iabscissa=0):
         x[i+1:] -= d[i]  # d[i] is smaller than zero
     return x
 
+def _remove_trailing(s, end='down'):
+    """remove trailing sequence repeatedly"""
+    if not end:
+        return s
+    while s.endswith(end):
+        s = s[:-len(end)]
+    return s
 class CMADataLogger(interfaces.BaseDataLogger):
     """data logger for class `CMAEvolutionStrategy`.
 
@@ -245,6 +284,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
                         'interquartile range, ' +
                         '25%tile, ' +
                         'current best feasible f-value, ' +
+                        'elapsed wallclock time [s], ' +
                         'further/more values", ' +
                         strseedtime +
                         ', ' + self.persistent_communication_dict.as_python_tag +
@@ -267,7 +307,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
             fn = self.name_prefix + name
             try:
                 with open(fn, 'w') as f:
-                    f.write('% # columns="iteration, evaluation, min max(neg(.)) min(pos(.))' +
+                    f.write('% # columns="iteration, evaluation, min 25%tile 75%tile' +
                             ' max correlation, correlation matrix principal axes lengths ' +
                             ' (sorted square roots of eigenvalues of correlation matrix)", ' +
                             strseedtime +
@@ -346,7 +386,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
             filenameprefix = self.name_prefix
         assert len(self.file_names) == len(self.key_names)
 
-        fn = filenameprefix.rstrip('down') + self.file_stoppings
+        fn = _remove_trailing(filenameprefix, 'down') + self.file_stoppings
         try:
             with open(fn, 'r') as f:
                 self.stoppings = f.read().strip()
@@ -355,7 +395,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
                 warnings.warn('reading from {0} failed with Exception {1}'.format(fn, e))
             self.stoppings = None  # don't keep previous condition
 
-        fn = filenameprefix + 'version.txt'
+        fn = _remove_trailing(filenameprefix, 'down') + 'version.txt'
         try:
             with open(fn, 'r') as f:
                 self.data_version = f.read().strip()
@@ -363,7 +403,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
             if os.path.isfile(fn):
                 warnings.warn('reading from {0} failed with Exception {1}'.format(fn, e))
 
-        fn = filenameprefix.rstrip('down') + self.file_parameters
+        fn = _remove_trailing(filenameprefix, 'down') + self.file_parameters
         try:
             with open(fn, 'r') as f:
                 self.parameters = f.read().strip()
@@ -454,7 +494,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
         """
         mod = modulo if modulo is not None else self.modulo
         self.counter += 1
-        if mod == 0 or (self.counter > 3 and (self.counter - 1) % mod):
+        if mod == 0:
             return
         if es is None:
             try:
@@ -463,6 +503,10 @@ class CMADataLogger(interfaces.BaseDataLogger):
                 raise AttributeError('call `add` with argument `es` or ``register(es)`` before ``add()``')
         elif not self.registered:
             self.register(es)
+
+        # es.stop has the desired side effect to update the termination state
+        if not es.stop() and self.counter > 3 and (self.counter - 1) % mod:
+            return
 
         if self.counter == 1 and not self.append and self.modulo != 0:
             self.initialize()  # write file headers
@@ -499,6 +543,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
         except Exception:
             if iteration > 0:  # first call without f-values is OK
                 raise
+        time_ = '{0:.1f}'.format(self.timer_all.elapsed)
         try:
             xrecent = es.best.last.x
         except Exception:
@@ -569,6 +614,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
                             + str(float(iqrangef)) + ' '
                             + str(float(p25)) + ' '  # 10th value (index 9)
                             + str(float(feasiblef)) + ' '
+                            + time_ + ' '  # index 11
                             # + str(es.sp.popsize) + ' '
                             # + str(10**es.noiseS) + ' '
                             # + str(es.sp.cmean) + ' '
@@ -676,7 +722,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
                             + str(float(bestf)) + ' '  # float converts Fraction
                             + ' '.join(map(str, xrecent))
                             + '\n')
-            fn = self.name_prefix.rstrip('down') + self.file_stoppings
+            fn = _remove_trailing(self.name_prefix, 'down') + self.file_stoppings
             with open(fn, 'w') as f:
                 try:
                     f.write(repr(es.stop(check=False)))
@@ -684,7 +730,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
                     pass
             if hasattr(es, 'sp') and self.parameters != es.sp.__dict__:
                 self.parameters = es.sp.__dict__
-                fn = self.name_prefix.rstrip('down') + self.file_parameters
+                fn = _remove_trailing(self.name_prefix, 'down') + self.file_parameters
                 with open(fn, 'w') as f:
                     try:
                         f.write(repr(self.parameters))
@@ -693,13 +739,13 @@ class CMADataLogger(interfaces.BaseDataLogger):
             try:  # experimental, WIP
                 from . import evolution_strategy
                 if hasattr(evolution_strategy, 'all_stoppings'):
-                    with open(self.name_prefix.rstrip('down') + 'all_stoppings.json2', 'w') as f:
+                    with open(_remove_trailing(self.name_prefix, 'down') + 'all_stoppings.json2', 'w') as f:
                         f.write(repr(evolution_strategy.all_stoppings))
             except Exception:
                 pass
             try:  # experimental, WIP
                 from . import __version__
-                with open(self.name_prefix + 'version.txt', 'w') as f:
+                with open(_remove_trailing(self.name_prefix, 'down') + 'version.txt', 'w') as f:
                     f.write(__version__)
             except Exception:
                 pass
@@ -731,8 +777,20 @@ class CMADataLogger(interfaces.BaseDataLogger):
         if nameprefix == self.name_prefix:
             return
 
+        if not os.path.exists(os.path.split(nameprefix)[0]):
+            os.makedirs(os.path.split(nameprefix)[0])
+
         for name in self.file_names:
             open(nameprefix + name + '.dat', 'w').write(open(self.name_prefix + name + '.dat').read())
+
+        if self.parameters is None:
+            self.load()
+
+        with open(nameprefix + self.file_parameters, 'w') as f:
+            try:
+                f.write(repr(self.parameters))
+            except Exception:
+                pass
 
         if switch:
             self.name_prefix = nameprefix
@@ -831,6 +889,8 @@ class CMADataLogger(interfaces.BaseDataLogger):
              addcols=None,
              load=True,
              message='',
+             remove_sigma=True,
+             normalize_scaling=False,
              **kwargs):
         """plot data from a `CMADataLogger` using files written by the logger.
 
@@ -886,6 +946,12 @@ class CMADataLogger(interfaces.BaseDataLogger):
         as a `CMADataLogger` instance itself does not load data by default.
 
         `message:str`: a message text appearing in the plot
+    
+        `remove_sigma`: disregard `sigma` when plotting individual standard
+        deviations.
+
+        `normalize_scaling`: plot axis scaling normalized with the geometric
+        average in each iteration.
 
         Return `CMADataLogger` itself.
 
@@ -972,7 +1038,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
             self.select_data(iteridx)
 
         if len(dat.f) <= 1:
-            print('nothing to plot')
+            print('too few data to plot (len(dat.f)={0})'.format(len(dat.f)))
             return self
 
         # not in use anymore, see formatter above
@@ -984,6 +1050,9 @@ class CMADataLogger(interfaces.BaseDataLogger):
         # dat.f[:,0]==countiter is monotonous
 
         figure(fig)
+        try: gcf().canvas.header_visible = False
+        except Exception: pass
+
         self.skip_finalize_plotting = True  # disable finalize until end of this plot function
         self._enter_plotting(fontsize)
         self.fighandle = gcf()  # fighandle.number
@@ -999,7 +1068,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
 
         # Scaling
         subplot(2, 2 + addcols, 3 + addcols)
-        self.plot_axes_scaling(iabscissa)
+        self.plot_axes_scaling(iabscissa, normalize=normalize_scaling)
 
         # spectrum of correlation matrix
         if 1 < 3 and addcols and hasattr(dat, 'corrspec'):
@@ -1028,7 +1097,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
 
         # standard deviations
         subplot(2, 2 + addcols, 4 + addcols)
-        self.plot_stds(iabscissa, idx=x_opt)
+        self.plot_stds(iabscissa, idx=x_opt, remove_sigma=remove_sigma)
 
         self.skip_finalize_plotting = False
         self._finalize_plotting()
@@ -1139,7 +1208,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
         self._finalize_plotting()
         warnings.warn('please use `plot` instead of `plot_all`')
         return self
-    def plot_axes_scaling(self, iabscissa=0):
+    def plot_axes_scaling(self, iabscissa=0, normalize=False):
         from matplotlib import pyplot
         if not hasattr(self, 'D'):
             self.load()
@@ -1154,8 +1223,15 @@ class CMADataLogger(interfaces.BaseDataLogger):
         color = iter(pyplot.get_cmap('plasma_r')(
                     np.linspace(0.35, 1, dat.D.shape[1] - 5)))
         _x = _monotone_abscissa(dat.D[:, iabscissa], iabscissa)
+        if normalize:
+            dd = dat.D.copy().T  # transpose to allow broadcasting
+            divisor = np.prod(dd[5:, :], axis=0)
+            dd /= divisor**(1 / (dd.shape[0] - 5))  # divisor is broadcasted here
+            dd = dd.T
+        else:
+            dd = dat.D
         for i in range(5, dat.D.shape[1]):
-            pyplot.semilogy(_x, dat.D[:, i],
+            pyplot.semilogy(_x, dd[:, i],
                             '-', color=next(color))
         # pyplot.hold(True)
         smartlogygrid()
@@ -1167,7 +1243,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
         self._xlabel(iabscissa)
         self._finalize_plotting()
         return self
-    def plot_stds(self, iabscissa=0, idx=None):
+    def plot_stds(self, iabscissa=0, idx=None, remove_sigma=True):
         """``iabscissa=1`` means vs function evaluations, `idx` picks variables to plot"""
         from matplotlib import pyplot
         if not hasattr(self, 'std'):
@@ -1185,14 +1261,15 @@ class CMADataLogger(interfaces.BaseDataLogger):
         except TypeError:
             pass  # idx was not an array
         # remove sigma from stds (graphs become much better readible)
-        dat.std[:, 5:] = np.transpose(dat.std[:, 5:].T / dat.std[:, 2].T)
+        if remove_sigma:
+            dat.std[:, 5:] = np.transpose(dat.std[:, 5:].T / dat.std[:, 2].T)
         # ax = array(pyplot.axis())
         # ax[1] = max(minxend, ax[1])
         # axis(ax)
         _x = _monotone_abscissa(dat.std[:, iabscissa], iabscissa)
         if 1 < 2 and dat.std.shape[1] < 100:
             # use fake last entry in x and std for line extension-annotation
-            minxend = int(1.06 * _x[-2])
+            minxend = int(1 + 1.07 * _x[-2])
             # minxend = int(1.06 * dat.x[-2, iabscissa])
             _x[-1] = minxend  # TODO: should be ax[1]
             idx = np.argsort(dat.std[-2, 5:])
@@ -1228,7 +1305,8 @@ class CMADataLogger(interfaces.BaseDataLogger):
             pyplot.semilogy(_x, dat.std[:, 5:], '-')
         # pyplot.hold(True)
         smartlogygrid()
-        pyplot.title(r'Standard Deviations $\times$ $\sigma^{-1}$ in All Coordinates')
+        pyplot.title(r'Standard Deviations{0} in All Coordinates'
+                      .format(r' $\times$ $\sigma^{-1}$' if remove_sigma else ''))
         # pyplot.xticks(xticklocs)
         self._xlabel(iabscissa)
         self._finalize_plotting()
@@ -1264,7 +1342,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
         _x = _monotone_abscissa(dat[:, iabscissa], iabscissa)
         if 1 < 2 and dat.shape[1] < 100:
             # use fake last entry in x and std for line extension-annotation
-            minxend = int(1.06 * _x[-2])
+            minxend = int(1 + 1.07 * _x[-2])
             # minxend = int(1.06 * dat.x[-2, iabscissa])
             _x[-1] = minxend  # TODO: should be ax[1]
             idx = np.argsort(dat[-2, 5:])
@@ -1415,19 +1493,29 @@ class CMADataLogger(interfaces.BaseDataLogger):
             # semilogy(dat.f[:, iabscissa], abs(dat.f[:,[6, 7, 10, 12]])+foffset,'-k')
             semilogy(_x, abs(dat.f[:, [8]]) + foffset, 'grey', linewidth=0.75)  # darkorange is nice
             text(_x[-2], abs(dat.f[-2, 8]) + foffset, 'IQR(f)', fontsize=fontsize)
-        if dat.f.shape[1] > 11:  # plot the largest columns in yellow
-            # dd = abs(dat.f[:,7:]) + 10*foffset
-            # dd = _where(dat.f[:,7:]==0, np.nan, dd) # cannot be
-            semilogy(_x, np.abs(dat.f[:, 11:]) + 10 * foffset, 'y', linewidth=0.7)
-            # hold(True)
-        # we may now overwrite some yellow lines (currently not)
         # column 9=p25 is not plotted
         # plot feasible f col index 10
         if dat.f.shape[1] > 10 and np.isfinite(dat.f[-1, [10]]):
             # semilogy(dat.f[:, iabscissa], abs(dat.f[:,[6, 7, 10, 12]])+foffset,'-k')
             semilogy(_x, abs(dat.f[:, [10]]) + foffset, 'b', linewidth=0.65)
             text(_x[-2], abs(dat.f[-2, 10]) + foffset, 'feasible f', fontsize=fontsize)
+        # index 11 time is not plotted
         # (larger indices): additional fitness data, for example constraints values
+        remaining_idx = 11
+        if dat.f.shape[1] > 11:  # decide whether to ignore index 11
+            if (  # time is written with 1 digit of precision
+                    np.any(dat.f[:100, 11] != np.round(dat.f[:100, 11]))
+                    and np.all(10 * dat.f[:100, 11] == np.round(10 * dat.f[:100, 11]))
+                ) or (  # ignore constant 0 or -1.1
+                    np.all(dat.f[:, 11] == 0) or np.all(dat.f[:, 11] == -1.1)
+                ):
+                remaining_idx = 12
+        if dat.f.shape[1] > remaining_idx:  # plot the remaining columns in yellow
+            # dd = abs(dat.f[:,7:]) + 10*foffset
+            # dd = _where(dat.f[:,7:]==0, np.nan, dd) # cannot be
+            semilogy(_x, np.abs(dat.f[:, remaining_idx:]) + 10 * foffset, 'y', linewidth=0.7)
+            # hold(True)
+        # we may now overwrite some yellow lines (currently not)
 
         idx = _where(dat.f[:, 5] > 1e-98)[0]  # positive values
         semilogy(_x[idx], dat.f[idx, 5] + foffset, '.b')
@@ -1474,17 +1562,6 @@ class CMADataLogger(interfaces.BaseDataLogger):
             # mark the respective first negative values
             semilogy(_x[istart], abs(dat.f[istart, 5]) +
                      foffset, '.r', markersize=7)
-
-        # standard deviations std
-        _x_std = _monotone_abscissa(dat.std[:, iabscissa])
-        semilogy(_x_std[:-1],
-                 np.vstack([list(map(max, dat.std[:-1, 5:])),
-                            list(map(min, dat.std[:-1, 5:]))]).T,
-                     '-m', linewidth=2)
-        text(_x_std[-2], max(dat.std[-2, 5:]), 'max std',
-             fontsize=fontsize)
-        text(_x_std[-2], min(dat.std[-2, 5:]), 'min std',
-             fontsize=fontsize)
 
         # delta-fitness in cyan
         for dfit, label in [
@@ -1542,6 +1619,17 @@ class CMADataLogger(interfaces.BaseDataLogger):
                     + 1e-98, sym, markersize=9)
         # semilogy(dat.f[-1, iabscissa]*np.ones(2), dat.f[-1,4]*np.ones(2), 'rd')
 
+        # standard deviations std
+        _x_std = _monotone_abscissa(dat.std[:, iabscissa])
+        semilogy(_x_std[:-1],
+                 np.vstack([list(map(np.max, dat.std[:-1, 5:])),
+                            list(map(np.min, dat.std[:-1, 5:]))]).T,
+                     '-m', linewidth=2)
+        text(_x_std[-2], np.max(dat.std[-2, 5:]), 'max std',
+             fontsize=fontsize)
+        text(_x_std[-2], np.min(dat.std[-2, 5:]), 'min std',
+             fontsize=fontsize)
+
         # AR and sigma
         semilogy(_x, dat.f[:, 3], '-r')  # AR
         semilogy(_x, dat.f[:, 2], '-g')  # sigma
@@ -1560,7 +1648,10 @@ class CMADataLogger(interfaces.BaseDataLogger):
             )
              #'.f_recent=' + repr(dat.f[-1, 5]))
         try:
-            text(ax[1], ax[3], 'v' + self.data_version, fontsize=5)
+            time_ = ''
+            if len(dat.f[-1]) > 11 and dat.f[-1, 11] * 10 == int(dat.f[-1, 11] * 10):
+                time_ = seconds2str(dat.f[-1, 11])  # times are rounded to .1 sec
+            text(ax[1], ax[3], '{0}\nby v'.format(time_) + self.data_version, fontsize=5)
         except Exception:
             pass
         self.f[:, 5:8] -= fshift
@@ -1573,14 +1664,16 @@ class CMADataLogger(interfaces.BaseDataLogger):
             semilogy(_x, np.max(dat.sigvec[:, 5:], axis=1) / np.min(dat.sigvec[:, 5:], axis=1),
                     'darkred', label='axis ratio of diagonal decoding')
             text(_x[-1], np.max(dat.sigvec[-1, 5:]) / np.min(dat.sigvec[-1, 5:]), 'dd-AR')
-        if np.size(dat.corrspec) > 1:
+        if corr_in_plot_divers_color and np.size(dat.corrspec) > 1:
             def c_odds(c):
                 cc = (c + 1) / (c - 1)
                 cc[cc < 0] = -1 / cc[cc < 0]
-                return cc
+                return cc if len(cc) > 1 else cc[0]
             _x = _monotone_abscissa(dat.corrspec[:, iabscissa], iabscissa)
-            semilogy(_x, c_odds(dat.corrspec[:, 2]), 'c', label=r'$\min (c + 1) / (c - 1)$')
-            semilogy(_x, c_odds(dat.corrspec[:, 5]), 'c', label=r'$\max (c + 1) / (c - 1)$')
+            semilogy(_x, c_odds(dat.corrspec[:, 2]),  # smallest = largest negative correlation
+                     corr_in_plot_divers_color, label=r'$\min (c + 1) / (c - 1)$')
+            semilogy(_x, c_odds(dat.corrspec[:, 5]),  # largest correlation
+                     corr_in_plot_divers_color, label=r'$\max (c + 1) / (c - 1)$')
             text(_x[-1], c_odds(np.asarray([dat.corrspec[-1, 2]])), r'$\max (c + 1) / (c - 1)$')
             text(_x[-1], c_odds(np.asarray([dat.corrspec[-1, 5]])), r'$-{\min}^{-1} (c + 1)\dots$')
 
@@ -1951,8 +2044,8 @@ class CMADataLogger(interfaces.BaseDataLogger):
                 xsemilog = True  # normalization assumes that zero is meaningful
 
         # modify fake last entry in x for line extension-annotation
-        if dat_x.shape[1] < 100:
-            minxend = int(1.06 * dat_x[-2, iabscissa])
+        if dat_x.shape[1] < cma_logger_plot_x_annotation_lines_limit:
+            minxend = int(1 + 1.07 * dat_x[-2, iabscissa])
             # write y-values for individual annotation into dat_x
             dat_x[-1, iabscissa] = minxend  # TODO: should be ax[1]
             if xsemilog or (xsemilog is None and remark and remark.startswith('mean')):
@@ -1978,7 +2071,7 @@ class CMADataLogger(interfaces.BaseDataLogger):
                 else:  # old kwarg
                     yscale('symlog', linthreshy=np.min(_d_pos))
             smartlogygrid(linthresh=np.min(_d_pos))
-        if dat_x.shape[1] < 100:  # annotations
+        if dat_x.shape[1] < cma_logger_plot_x_annotation_lines_limit:  # annotations
             ax = array(axis())
             axis(ax)
             # yy = np.linspace(ax[2] + 1e-6, ax[3] - 1e-6, dat_x.shape[1] - 5)
@@ -1988,9 +2081,11 @@ class CMADataLogger(interfaces.BaseDataLogger):
                 array([ax[2] + 1e-6, ax[3] - 1e-6]), 'k-')
             # plot(array([dat_x[-1, iabscissa], ax[1]]),
             #      reshape(array([dat_x[-1,5:], yy[idx2]]).flatten(), (2,4)), '-k')
-            for i in range(len(idx)):
+            for i in cma_logger_plot_x_annotate_idx:
                 # TODOqqq: annotate phenotypic value!?
                 # text(ax[1], yy[i], 'x(' + str(idx[i]) + ')=' + str(dat_x[-2,5+idx[i]]))
+                if i >= len(idx):
+                    break
                 text(_x[-1], dat_x[-1, 5 + i],
                     ('' + str(i) + ': ' if annotations is None
                         else str(i) + ':' + annotations[i] + "=")
@@ -2046,13 +2141,16 @@ class CMADataLogger(interfaces.BaseDataLogger):
                               .format(self.name_prefix + name + '.dat'))
                 continue
             with open(newprefix + name + '.dat', 'wt') as f:
-                iline = 0
+                iline = -1
                 cwritten = 0
                 for line in open(self.name_prefix + name + '.dat'):
+                    iline += 1
                     if iline < first or iline % factor < 1:
                         f.write(line)
                         cwritten += 1
-                    iline += 1
+                if iline % factor >= 1:  # write always last line
+                    f.write(line)
+                    cwritten += 1
             if verbose and iline > first:
                 print('%d' % (cwritten) + ' lines written in ' + newprefix + name + '.dat')
         if switch:
@@ -2169,7 +2267,9 @@ def plot(name=None, fig=None, abscissa=0,
          xsemilog=None,
          xnormalize=None,
          **kwargs):
-    """plot data from files written by a `CMADataLogger`, see `CMADataLogger.plot`.
+    """plot data from files written by a `CMADataLogger`,
+
+    see `cma.CMADataLogger.plot` to see all valid keyword arguments.
 
     ``cma.plot()`` plots the data from the default output folder (which is
     by default always overwritten). ``cma.plot(name, **argsdict)`` is a
@@ -2181,8 +2281,6 @@ def plot(name=None, fig=None, abscissa=0,
     The explictly given arguments are for backwards compatibility of their
     default setting and may disappear. All arguments are documented in
     `CMADataLogger.plot`.
-
-
     """
     global last_figure_number
     if not fig:
@@ -2550,7 +2648,8 @@ class Logger(object):
             self.count = len(self.data)
         return self
 
-    def plot(self, plot=None, clear=True, transformations=None):
+    def plot(self, plot=None, clear=True, transformations=None,
+             smoothing=_id, color='plasma', labels=True, **kwargs):
         """plot logged data using the `plot` function.
 
         If `clear`, this calls `matplotlib.pyplot.gca().clear()` before
@@ -2559,6 +2658,10 @@ class Logger(object):
 
         If ``transformations[i]`` is a `callable` it is used to transform the i-th
         data column like ``i_th_column = transformations[i](data[:,i])``.
+
+        `smoothing` (over time) is applied to each data column, a light
+        (though slow) smoothing would be
+        ``functools.partial(cma.utilities.math.moving_average, w=1.1)``.
         """
         try:
             from matplotlib import pyplot as plt
@@ -2578,10 +2681,14 @@ class Logger(object):
         if m < 2:  # data cannot be indexed like data[:,0]
             try: data = transformations[0](self.data)
             except (IndexError, TypeError): data = self.data
-            plot(range(1, n + 1), data,
-                 label=self.labels[0] if self.labels else None)
+            plot(range(1, n + 1), smoothing(data),
+                 label=self.labels[0] if clear and self.labels else None,
+                 **kwargs)
         else:
-            color = iter(plt.get_cmap('plasma')(np.linspace(0.01, 0.9, m)))  # plasma was: winter_r
+            if color:
+                colors = iter(plt.get_cmap(color)(np.linspace(0.01, 0.85, m)))  # plasma was: winter_r
+            else:
+                colors = None
             idx_labels = [int(i * m / len(self.labels)) for i in range(len(self.labels))]
             if len(idx_labels) > 1:
                 idx_labels[-1] = m - 1  # last label goes to the line m - 1
@@ -2590,13 +2697,15 @@ class Logger(object):
                 column = self.data[:, i]
                 try: column = transformations[i](column)
                 except (IndexError, TypeError): pass
-                plot(range(1, n + 1), column,
-                    color=next(color),
-                    label=next(labels) if i in idx_labels else None,
-                    linewidth=1 - 0.7 * m / (m + 10))
-                # plt.gca().get_lines()[0].set_color(next(color))
+                plot(range(1, n + 1), smoothing(column),
+                    color=next(colors) if colors else None,
+                    label=next(labels) if clear and i in idx_labels else None,
+                    linewidth=1 - 0.7 * m / (m + 10),
+                    **kwargs)
+                # plt.gca().get_lines()[0].set_color(next(colors))
         if self.labels:
             plt.legend(framealpha=0.3)  # more opaque than not
+        plt.grid(True, which='both')
         plt.gcf().canvas.draw()  # allows online use
         return self
 

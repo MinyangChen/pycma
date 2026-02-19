@@ -103,7 +103,7 @@ del _ab, _di, _pr
 
 ___author__ = "Nikolaus Hansen and Petr Baudis and Youhei Akimoto"
 __license__ = "BSD 3-clause"
-__version__ = "4.4.0"
+__version__ = "4.4.2"
 
 
 import collections as _collections
@@ -135,6 +135,7 @@ else:
     from .optimization_tools import NoiseHandler
     from .boundary_handler import BoundPenalty, BoundTransform, BoundNone, BoundDomainTransform
     from .constraints_handler import ConstrainedFitnessAL, AugmentedLagrangian
+    constraints_handler.BoundTransform = BoundTransform  # for backwards compatibility
 
 try:
     version_info = _collections.namedtuple(
