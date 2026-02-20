@@ -179,11 +179,11 @@ def main() -> None:
 
 
     # Use fixed seeds for repeatable runs across optimizers/problems.
-    run_times = 1  # number of independent runs per optimizer/problem
+    run_times = 10  # number of independent runs per optimizer/problem
     seeds = list(range(1, run_times + 1))
 
     # seeds = [42]
-    max_evals = 3000
+    max_evals = 100000
 
     runner = ExperimentRunner(
         optimizers={
@@ -208,7 +208,7 @@ def main() -> None:
         },
         problems={
             # Standard benchmark
-            # "ackley": AckleyProblem,
+            "ackley": AckleyProblem,
             # "ackley20": AckleyProblem,
             # "ackley10": AckleyProblem,
 
@@ -494,7 +494,7 @@ def main() -> None:
         problem_configs=problem_configs,
     )
 
-    # export_convergence(results, max_evals=max_evals, out_dir="convergence")
+    export_convergence(results, max_evals=max_evals, out_dir="convergence")
 
 
 if __name__ == "__main__":

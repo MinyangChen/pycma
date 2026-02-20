@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 from typing import List, Optional
 
@@ -79,36 +78,33 @@ def plot_curves(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot mean convergence curves from .npz exports.")
-    parser.add_argument("problem", nargs="?", help="Problem name prefix used in .npz files (e.g., ackley)")
-    parser.add_argument("--input_dir", default="convergence", help="Directory containing .npz files")
-    parser.add_argument("--out_dir", default="convergence", help="Directory to save the plot")
-    parser.add_argument("--logy", action="store_true", help="Use log scale on y-axis")
-    parser.add_argument("--max_fe", type=int, default=100000, help="Maximum FE to plot (crop curves). Use None to disable.")
-    parser.add_argument("--show", action="store_true", help="Show the plot window")
-    args = parser.parse_args()
+    # Configuration (edit these values as needed).
+    problem: Optional[str] = "ackley"
+    input_dir: str = "convergence"
+    out_dir: str = "convergence"
+    logy: bool = False
+    show: bool = False
+    max_fe: Optional[int] = 100000
 
-    input_dir = Path(args.input_dir)
-    if not input_dir.exists():
-        raise SystemExit(f"Input directory not found: {input_dir}")
+    input_dir_path = Path(input_dir)
+    if not input_dir_path.exists():
+        raise SystemExit(f"Input directory not found: {input_dir_path}")
 
-    problem = args.problem
     if problem is None:
-        candidates = sorted(input_dir.glob("*_runs*.npz"))
+        candidates = sorted(input_dir_path.glob("*_runs*.npz"))
         if not candidates:
-            raise SystemExit(f"No .npz files found in {input_dir}")
+            raise SystemExit(f"No .npz files found in {input_dir_path}")
         problems = {p.stem.split("_")[0] for p in candidates}
         if len(problems) != 1:
             raise SystemExit(f"Multiple problems found ({', '.join(sorted(problems))}); please provide one explicitly.")
         problem = next(iter(problems))
 
-    curves = load_curves(input_dir, problem)
+    curves = load_curves(input_dir_path, problem)
     if not curves:
-        raise SystemExit(f"No files found matching {problem}_*_runs*.npz in {input_dir}")
+        raise SystemExit(f"No files found matching {problem}_*_runs*.npz in {input_dir_path}")
 
-    out_path = Path(args.out_dir) / f"{problem}_mean_convergence.png"
-    max_fe = args.max_fe if args.max_fe is not None else None
-    plot_curves(curves, out_path, logy=args.logy, show=args.show, max_fe=max_fe)
+    out_path = Path(out_dir) / f"{problem}_mean_convergence.png"
+    plot_curves(curves, out_path, logy=logy, show=show, max_fe=max_fe)
     print(f"Saved plot to {out_path}")
 
 
