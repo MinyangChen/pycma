@@ -112,6 +112,8 @@ class DEGPOptimizer(BaseOptimizer):
         dim: int,
         seed: int = 0,
         pop_size: Optional[int] = None,
+        alpha_size: Optional[int] = None,
+        train_size: Optional[int] = None,
         F: float = 0.5,
         CR: float = 0.9,
         k_true: int = 5,
@@ -130,14 +132,19 @@ class DEGPOptimizer(BaseOptimizer):
         base_size = max(1, 5 * int(dim))
         if pop_size is None:
             pop_size = base_size
+        if alpha_size is None:
+            alpha_size = base_size
+        if train_size is None:
+            train_size = base_size
+
         self.pop_size = int(pop_size)
-        self.alpha_size = base_size  # initial true archive size
-        self.train_size = base_size  # tau: training archive cap
+        self.alpha_size = int(alpha_size)  # initial true archive size
+        self.train_size = int(train_size)  # tau: training archive cap
 
         if self.pop_size < 4:
             raise ValueError("DEGPOptimizer requires pop_size >= 4.")
         if self.pop_size > self.alpha_size:
-            raise ValueError("pop_size must be <= 5 * dim to initialize from the alpha archive.")
+            raise ValueError("pop_size must be <= alpha_size to initialize from the alpha archive.")
 
         self.F = float(F)
         if self.F <= 0:
@@ -186,7 +193,11 @@ class DEGPOptimizer(BaseOptimizer):
         lower, upper = self._get_bounds(problem)
 
         n_init = min(self.alpha_size, int(max_evals))
-        X_init = lower + (upper - lower) * self.rng.random((n_init, self.dim))
+        # Latin Hypercube Sampling in [0, 1]^D, then scale to [lower, upper].
+        jitter = self.rng.random((n_init, self.dim))
+        perms = np.column_stack([self.rng.permutation(n_init) for _ in range(self.dim)])
+        lhs_unit = (perms + jitter) / float(max(n_init, 1))
+        X_init = lower + (upper - lower) * lhs_unit
         y_init = np.asarray(eval_batch(X_init), dtype=float).reshape(-1)
 
         n_pop = min(self.pop_size, n_init)
@@ -380,4 +391,3 @@ class DEGPOptimizer(BaseOptimizer):
                 break
 
         return self._truncate_solution(st.best_x), float(st.best_f), history
-

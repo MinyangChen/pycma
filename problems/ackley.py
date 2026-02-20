@@ -5,7 +5,9 @@ import numpy as np
 
 
 class AckleyProblem:
-    """Ackley benchmark optimisation problem with a stored random optimum."""
+    """Ackley benchmark optimisation problem with a fixed stored optimum."""
+
+    _OPTIMUM_LENGTH = 100
 
     def __init__(
         self,
@@ -13,10 +15,11 @@ class AckleyProblem:
         lower_bound: Union[float, np.ndarray] = -32.768,
         upper_bound: Union[float, np.ndarray] = 32.768,
         name: str = "ackley",
-        optimum: Optional[Union[float, np.ndarray]] = None,
         optimum_path: Optional[str] = None,
-        rng: Optional[np.random.Generator] = None,
     ) -> None:
+        if dim > self._OPTIMUM_LENGTH:
+            raise ValueError(f"dim={dim} exceeds optimum length ({self._OPTIMUM_LENGTH}).")
+
         self._dim = dim
         lb = np.asarray(lower_bound, dtype=float)
         ub = np.asarray(upper_bound, dtype=float)
@@ -28,19 +31,19 @@ class AckleyProblem:
         self._lower_bound = lb.reshape(dim)
         self._upper_bound = ub.reshape(dim)
         self._name = name
-        self._rng = rng or np.random.default_rng()
 
         if optimum_path is None:
             base_dir = os.path.dirname(os.path.abspath(__file__))
-            optimum_path = os.path.join(base_dir, "ackley_optimum.txt")
+            opt_dir = os.path.join(base_dir, "optimum")
+            optimum_path = os.path.join(opt_dir, "ackley_optimum_100d.txt")
         self._optimum_path = optimum_path
 
-        if optimum is not None:
-            opt = self._validate_optimum(optimum)
-            self._optimum = opt
-            self._save_optimum(opt)
+        full_optimum = self._load_fixed_optimum()
+        if dim < self._OPTIMUM_LENGTH:
+            opt = full_optimum[:dim]
         else:
-            self._optimum = self._load_or_create_optimum()
+            opt = full_optimum
+        self._optimum = self._validate_optimum(opt)
 
     @property
     def dim(self) -> int:
@@ -86,22 +89,42 @@ class AckleyProblem:
             raise ValueError("Optimum must lie within the problem bounds.")
         return opt
 
-    def _load_or_create_optimum(self) -> np.ndarray:
-        if os.path.isfile(self._optimum_path):
-            try:
-                loaded = np.loadtxt(self._optimum_path, ndmin=2)
-                if loaded.shape[1] == self._dim:
-                    opt = loaded.reshape(self._dim)
-                    if np.all(opt >= self._lower_bound) and np.all(opt <= self._upper_bound):
-                        return opt
-            except Exception:
-                pass
+    def _load_fixed_optimum(self) -> np.ndarray:
+        if not os.path.isfile(self._optimum_path):
+            raise FileNotFoundError(
+                f"Ackley optimum file not found at '{self._optimum_path}'."
+            )
+        try:
+            loaded = np.loadtxt(self._optimum_path, ndmin=2, dtype=float)
+        except Exception as exc:
+            raise ValueError(
+                f"Failed to parse Ackley optimum file at '{self._optimum_path}': {exc}"
+            ) from exc
 
-        opt = self._rng.uniform(self._lower_bound, self._upper_bound, size=self._dim)
-        opt = np.clip(opt, self._lower_bound, self._upper_bound)
-        self._save_optimum(opt)
-        return opt
+        if loaded.shape != (1, self._OPTIMUM_LENGTH):
+            raise ValueError(
+                f"Ackley optimum file at '{self._optimum_path}' must contain exactly "
+                f"1 row and {self._OPTIMUM_LENGTH} columns, got shape {loaded.shape}."
+            )
+        if not np.all(np.isfinite(loaded)):
+            raise ValueError(
+                f"Ackley optimum file at '{self._optimum_path}' contains non-finite values."
+            )
+        return loaded.reshape(self._OPTIMUM_LENGTH)
 
-    def _save_optimum(self, optimum: np.ndarray) -> None:
-        os.makedirs(os.path.dirname(self._optimum_path), exist_ok=True)
-        np.savetxt(self._optimum_path, optimum[None, :], fmt="%.16f")
+
+if __name__ == "__main__":
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    opt_dir = os.path.join(base_dir, "optimum")
+    opt_path = os.path.join(opt_dir, "ackley_optimum_100d.txt")
+
+    if os.path.exists(opt_path):
+        print(f"Ackley optimum file already exists at '{opt_path}'. Not overwriting.")
+    else:
+        os.makedirs(opt_dir, exist_ok=True)
+        rng = np.random.default_rng(42)
+        lower_bound = -32.768
+        upper_bound = 32.768
+        optimum = rng.uniform(lower_bound, upper_bound, size=100)
+        np.savetxt(opt_path, optimum[None, :], fmt="%.16f")
+        print(f"Created Ackley optimum file at '{opt_path}'.")

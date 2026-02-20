@@ -179,16 +179,17 @@ def main() -> None:
 
 
     # Use fixed seeds for repeatable runs across optimizers/problems.
-    run_times = 5  # number of independent runs per optimizer/problem
-    seeds = list(range(run_times))
+    run_times = 1  # number of independent runs per optimizer/problem
+    seeds = list(range(1, run_times + 1))
+
     # seeds = [42]
     max_evals = 3000
 
     runner = ExperimentRunner(
         optimizers={
             # CMA-ES baseline
-            # "cma": PyCMAESOptimizer
-            "dts_cma": DTSCMAESOptimizer,
+            "cma": PyCMAESOptimizer
+            # "dts_cma": DTSCMAESOptimizer,
             # "dts_bnn_cma": DTSBNN_CMAESOptimizer,
             # "shade_gp": SHADEGPOptimizer,
             # "gp_shade": GPSHADEOptimizer,
@@ -208,7 +209,7 @@ def main() -> None:
         problems={
             # Standard benchmark
             # "ackley": AckleyProblem,
-            "ackley20": AckleyProblem,
+            # "ackley20": AckleyProblem,
             # "ackley10": AckleyProblem,
 
             # HS5 variants
@@ -224,6 +225,7 @@ def main() -> None:
             "bounds": None,
             "popsize": None,
             "popsize_mode":"double", # default / double
+            "verb_disp":10,
         },
         "dts_cma": {
             "sigma0": 20,
@@ -401,20 +403,22 @@ def main() -> None:
             "print_every": 500,
         },
         "de_gp": {
-            "pop_size": None,  # defaults to 5 * dim
+            "pop_size": 100,   # 5 * D, with D=20 for ackley20
+            "alpha_size": 300, # 20 * D
+            "train_size": 300, # 20 * D
             # "F": 0.5,
-            "F": 0.8,
+            "F": 0.5,
             "CR": 0.9,
             "k_true": 1,
-            "strategy": "current-to-best",  # "rand" / "best" / "current-to-best"
-            # "strategy": "best",  # "rand" / "best" / "current-to-best"
+            # "strategy": "current-to-best",  # "rand" / "best" / "current-to-best"
+            "strategy": "rand",  # "rand" / "best" / "current-to-best"
             "rank_mode": "lcb",  # "lcb" / "mean"
             "kappa": 1.0,
             "gp_nu": 2.5,
             "gp_n_restarts_optimizer": 0,
             "gp_random_state": None,
             "gp_y_std_min": 1e-12,
-            "print_every": 500,
+            "print_every": 10,
         },
         "lshade": {
             "pop_size": 100,
@@ -490,7 +494,7 @@ def main() -> None:
         problem_configs=problem_configs,
     )
 
-    export_convergence(results, max_evals=max_evals, out_dir="convergence")
+    # export_convergence(results, max_evals=max_evals, out_dir="convergence")
 
 
 if __name__ == "__main__":
