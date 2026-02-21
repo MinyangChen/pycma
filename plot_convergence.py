@@ -81,10 +81,10 @@ def main() -> None:
     # Configuration (edit these values as needed).
     problem: Optional[str] = "ackley"
     input_dir: str = "convergence"
-    out_dir: str = "convergence"
+    out_dir: str = "results/figurefigures"
     logy: bool = False
     show: bool = False
-    max_fe: Optional[int] = 100000
+    max_fe: Optional[int] = 10000
 
     input_dir_path = Path(input_dir)
     if not input_dir_path.exists():
