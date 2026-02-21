@@ -332,10 +332,10 @@ class DTSCMAESOptimizer(BaseOptimizer):
         alpha_max: float = 1.0,           # Upper bound for adaptive α (1.0 -> full true-evaluation generation)
         min_true_per_gen: int = 1,        # Minimum number of true evaluations per generation (hard floor)
         # warmup_min_points: Optional[int] = None,  # default: max(10D, 50)
-        warmup_min_points: Optional[int] = 500,  # default: max(10D, 50)
+        warmup_min_points: Optional[int] = 1000,  # default: max(10D, 50)
         n_min_train: Optional[int] = None,        # default: max(5, 3D)
         # n_max_train: Optional[int] = None,        # default: min(20D, 300)
-        n_max_train: Optional[int] = 500,        # default: min(20D, 300)
+        n_max_train: Optional[int] = 1000,        # default: min(20D, 300)
         radius_mode: str = "chi2",                # "chi2" or "sqrt_dim"
         radius_chi2_p: float = 0.99,              # Chi-square quantile p used to define the Mahalanobis-radius
         r_A_max_factor: float = 4.0,              # Multiplicative factor to scale the radius (larger -> less local training set)
@@ -449,8 +449,8 @@ class DTSCMAESOptimizer(BaseOptimizer):
         if self.popsize_mode == "default":
             return 4 + int(math.floor(3.0 * math.log(d)))
         if self.popsize_mode == "double":
-            # return 8 + int(math.ceil(6.0 * math.log(d)))
-            return 2*(8 + int(math.ceil(6.0 * math.log(d))))
+            return 8 + int(math.ceil(6.0 * math.log(d)))
+            # return 2*(8 + int(math.ceil(6.0 * math.log(d))))
         raise ValueError(f"Unknown popsize_mode: {self.popsize_mode}")
 
     def _compute_r_A_max(self) -> float:

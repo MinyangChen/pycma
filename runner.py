@@ -179,17 +179,17 @@ def main() -> None:
 
 
     # Use fixed seeds for repeatable runs across optimizers/problems.
-    run_times = 10  # number of independent runs per optimizer/problem
+    run_times = 3  # number of independent runs per optimizer/problem
     seeds = list(range(1, run_times + 1))
 
     # seeds = [42]
-    max_evals = 100000
+    max_evals = 10000
 
     runner = ExperimentRunner(
         optimizers={
             # CMA-ES baseline
-            "cma": PyCMAESOptimizer
-            # "dts_cma": DTSCMAESOptimizer,
+            # "cma": PyCMAESOptimizer
+            "dts_cma": DTSCMAESOptimizer,
             # "dts_bnn_cma": DTSBNN_CMAESOptimizer,
             # "shade_gp": SHADEGPOptimizer,
             # "gp_shade": GPSHADEOptimizer,
@@ -404,8 +404,8 @@ def main() -> None:
         },
         "de_gp": {
             "pop_size": 100,   # 5 * D, with D=20 for ackley20
-            "alpha_size": 300, # 20 * D
-            "train_size": 300, # 20 * D
+            "alpha_size": 1000, # 20 * D
+            "train_size": 1000, # 20 * D
             # "F": 0.5,
             "F": 0.5,
             "CR": 0.9,
