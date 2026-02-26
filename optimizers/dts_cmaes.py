@@ -344,18 +344,22 @@ class DTSCMAESOptimizer(BaseOptimizer):
         prediction_guard: str = "shift",          # "shift"/"clamp"/"none"
         use_model_cache: bool = True,             # Reuse last trained model if (re)training fails (avoid full-eval fallback)
         max_model_age: int = 2,                   # Maximum number of generations a cached model can be reused
-        whiten_jitter: float = 1e-12,             # Diagonal jitter added to covariance in whitening for numerical stability
+        # whiten_jitter: float = 1e-12,             # Diagonal jitter added to covariance in whitening for numerical stability
+        whiten_jitter: float = 1e-10,             # Diagonal jitter added to covariance in whitening for numerical stability
+
         # ---- NEW: local-only surrogate gate ----
         require_min_points_in_radius: bool = False,  # If True, require >= n_min_train archive points inside radius to enable surrogate
         # ---- GP hyperparams ----
         gp_nu: float = 2.5,                          # Matérn kernel ν parameter (smoothness; 2.5 is a common default)
         gp_constant_value: float = 1.0,              # Initial ConstantKernel value (overall output scale prior)
         gp_constant_bounds: Tuple[float, float] = (1e-3, 1e3),  # Bounds for ConstantKernel during hyperparameter optimization
-        gp_length_scale: float = 1.0,                # Initial Matérn length-scale (input scale prior)
-        gp_length_scale_bounds: Tuple[float, float] = (1e-2, 1e2),  # Bounds for length-scale during hyperparameter optimization
+        gp_length_scale: float = 1,                # Initial Matérn length-scale (input scale prior)
+        gp_length_scale_bounds: Tuple[float, float] = (1e-3, 1e2),  # Bounds for length-scale during hyperparameter optimization
         gp_noise_level: float = 1e-6,                # Initial WhiteKernel noise level (observation/numerical noise)
         gp_noise_bounds: Tuple[float, float] = (1e-10, 1e-3),       # Bounds for noise level during hyperparameter optimization
-        gp_n_restarts_optimizer: int = 1,            # Number of restarts for GP hyperparameter optimizer (more = slower, potentially better)
+        # gp_n_restarts_optimizer: int = 1,            # Number of restarts for GP hyperparameter optimizer (more = slower, potentially better)
+        gp_n_restarts_optimizer: int = 10,            # Number of restarts for GP hyperparameter optimizer (more = slower, potentially better)
+
         gp_random_state: Optional[int] = None,       # Random state for GP hyperparameter optimization (None -> not fixed)
         gp_y_std_min: float = 1e-12,                 # Minimum std(y) required to fit GP (too-flat y -> skip training)
         # ---- Logging ----

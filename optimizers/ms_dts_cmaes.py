@@ -260,7 +260,7 @@ class MSDTSCMAESOptimizer(BaseOptimizer):
         alpha_min: float = 0.04,
         alpha_max: float = 1.0,
         min_true_per_gen: int = 1,
-        warmup_min_points: Optional[int] = None,  # default: max(10D, 50)
+        warmup_min_points: Optional[int] = 1000,  # default: max(10D, 50)
         n_min_train: Optional[int] = None,        # used by optional radius gate
         n_max_train: Optional[int] = None,        # kept for parity; not otherwise used
         radius_mode: str = "chi2",                # "chi2" or "sqrt_dim"

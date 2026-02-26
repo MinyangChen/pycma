@@ -7,8 +7,8 @@ print("keys:", d.files)
 fe = d["fe"]
 mean = d["mean"]
 print("fe shape:", fe.shape, "mean shape:", mean.shape)
-print("fe head/tail:", fe[600:610], fe[-10:])
-print("mean head/tail:", mean[600:605], mean[-5:])
+print("fe head/tail:", fe[0:50], fe[-10:])
+print("mean head/tail:", mean[0:50], mean[-5:])
 
 # check whether fe is a uniform grid
 diff = np.unique(np.diff(fe))

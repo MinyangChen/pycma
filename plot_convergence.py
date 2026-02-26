@@ -79,9 +79,10 @@ def plot_curves(
 
 def main() -> None:
     # Configuration (edit these values as needed).
-    problem: Optional[str] = "ackley"
+    problem: Optional[str] = "ackleyshifted100"
     input_dir: str = "convergence"
-    out_dir: str = "results/figurefigures"
+    out_dir = Path("results") / "figures"
+    out_dir.mkdir(parents=True, exist_ok=True)
     logy: bool = False
     show: bool = False
     max_fe: Optional[int] = 10000

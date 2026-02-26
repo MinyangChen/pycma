@@ -121,10 +121,10 @@ class DEGPOptimizer(BaseOptimizer):
         rank_mode: str = "lcb",  # "lcb" or "mean"
         kappa: float = 1.0,
         gp_nu: float = 2.5,
-        gp_n_restarts_optimizer: int = 0,
+        gp_n_restarts_optimizer: int = 10,
         gp_random_state: Optional[int] = None,
         gp_y_std_min: float = 1e-12,
-        print_every: int = 0,
+        print_every: int = 10,
         **kwargs: Any,
     ) -> None:
         super().__init__(dim=dim, seed=seed)

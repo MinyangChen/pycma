@@ -122,7 +122,7 @@ if __name__ == "__main__":
         print(f"Ackley optimum file already exists at '{opt_path}'. Not overwriting.")
     else:
         os.makedirs(opt_dir, exist_ok=True)
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(2026)
         lower_bound = -32.768
         upper_bound = 32.768
         optimum = rng.uniform(lower_bound, upper_bound, size=100)

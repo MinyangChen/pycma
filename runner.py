@@ -61,8 +61,8 @@ class ExperimentRunner:
                 # Only fill optional parameters when the config declares them.
                 if "sigma0" in opt_cfg and opt_cfg["sigma0"] is None:
                     opt_cfg["sigma0"] = sigma0_auto
-                if "bounds" in opt_cfg and opt_cfg["bounds"] is None:
-                    opt_cfg["bounds"] = (lower, upper)
+                # if "bounds" in opt_cfg and opt_cfg["bounds"] is None:
+                #     opt_cfg["bounds"] = (lower, upper)
 
                 key = (prob_name, opt_name)
                 results[key] = []
@@ -179,7 +179,7 @@ def main() -> None:
 
 
     # Use fixed seeds for repeatable runs across optimizers/problems.
-    run_times = 3  # number of independent runs per optimizer/problem
+    run_times = 10  # number of independent runs per optimizer/problem
     seeds = list(range(1, run_times + 1))
 
     # seeds = [42]
@@ -189,18 +189,18 @@ def main() -> None:
         optimizers={
             # CMA-ES baseline
             # "cma": PyCMAESOptimizer
-            "dts_cma": DTSCMAESOptimizer,
+            # "dts_cma": DTSCMAESOptimizer,
             # "dts_bnn_cma": DTSBNN_CMAESOptimizer,
             # "shade_gp": SHADEGPOptimizer,
             # "gp_shade": GPSHADEOptimizer,
             # "de_gp": DEGPOptimizer,
             # "dts_brq_cma": DTSBRQ_CMAESOptimizer,
-            # "ms_dts_cma": MSDTSCMAESOptimizer,
+            "ms_dts_cma": MSDTSCMAESOptimizer,
             # "dts_rank_cma": DTS_RANK_CMAESOptimizer,
             # # DE family
             # "shade": SHADEOptimizer,
             # "lshade": LSHADEOptimizer,
-            # "ms_shade": MSSHADEOptimizer,
+            "ms_shade": MSSHADEOptimizer,
             # "ms_lshade": MSLSHADEOptimizer,
             # "lq_cma": PyLQCMAESOptimizer,
             # "smas_shade": MSSHADEOptimizer,
@@ -208,7 +208,7 @@ def main() -> None:
         },
         problems={
             # Standard benchmark
-            "ackley": AckleyProblem,
+            "ackley100": AckleyProblem,
             # "ackley20": AckleyProblem,
             # "ackley10": AckleyProblem,
 
@@ -415,7 +415,7 @@ def main() -> None:
             "rank_mode": "lcb",  # "lcb" / "mean"
             "kappa": 1.0,
             "gp_nu": 2.5,
-            "gp_n_restarts_optimizer": 0,
+            "gp_n_restarts_optimizer": 10,
             "gp_random_state": None,
             "gp_y_std_min": 1e-12,
             "print_every": 10,
@@ -480,7 +480,7 @@ def main() -> None:
     }
 
     problem_configs = {
-        "ackley": {"dim": 100, "name": "ackley"},
+        "ackley100": {"dim": 100, "name": "ackley"},
         "ackley20": {"dim": 20, "name": "ackley"},
         "ackley10": {"dim": 10, "name": "ackley"},
         "AdditiveSubsystem": {},
